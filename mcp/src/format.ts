@@ -3,8 +3,9 @@
 export interface Element {
   id: string; type: string; text?: string; tooltip?: string; changeable?: boolean;
   selected?: boolean; key?: string; required?: boolean; control?: string; subtype?: string;
-  rowCount?: number; title?: string;
+  rowCount?: number; title?: string; html?: string; htmlError?: string;
 }
+export interface Popup { title: string; texts: string[]; buttons: { id: string; text: string }[] }
 export interface Screen {
   session: { id: string; system: string; client: string; user: string; transaction: string; program: string; screen: number };
   activeWindow: string;
@@ -12,6 +13,20 @@ export interface Screen {
   elements: Element[];
   statusBar: { type: string; text: string; id: string; number: string } | null;
   truncated: boolean;
+  popup?: Popup;
+}
+
+export function formatPopup(p: Popup): string[] {
+  const lines = [`POPUP ${q(p.title)} – read before answering:`];
+  const seen = new Set<string>();
+  for (const t of p.texts) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    for (const l of t.split("\n")) lines.push(`  | ${l}`);
+  }
+  if (!p.texts.length) lines.push("  | (no text found – check the elements below)");
+  if (p.buttons.length) lines.push("  answers: " + p.buttons.map(b => `${q(b.text)}=${b.id}`).join(", "));
+  return lines;
 }
 
 const INPUTS = new Set(["GuiTextField", "GuiCTextField", "GuiPasswordField", "GuiOKCodeField", "GuiComboBox"]);
@@ -33,6 +48,8 @@ export function formatElement(e: Element): string {
   if (e.control) parts.push(`control=${e.control}${e.subtype ? "/" + e.subtype : ""}`);
   if (e.rowCount !== undefined) parts.push(`rows=${e.rowCount}`);
   if (e.title) parts.push(`title=${q(e.title)}`);
+  if (e.html) parts.push(`html=${q(e.html.length > 300 ? e.html.slice(0, 300) + " …" : e.html)}`);
+  if (e.htmlError) parts.push(`htmlErr=${q(e.htmlError)}`);
   return parts.join("  ");
 }
 
@@ -44,6 +61,7 @@ export function formatScreen(s: Screen): string {
   if (s.windows.length > 1) lines.push("windows: " + s.windows.map(w => `${w.id} ${w.type.replace(/^Gui/, "")} ${q(w.title)}`).join("; "));
   const sb = s.statusBar;
   lines.push(sb && sb.text ? `status: [${sb.type || "-"}] ${sb.text}${sb.id ? ` (${sb.id}/${sb.number})` : ""}` : "status: (empty)");
+  if (s.popup) lines.push(...formatPopup(s.popup));
   lines.push("elements (id  type  value/text  flags):");
   for (const e of s.elements) lines.push("  " + formatElement(e));
   if (s.truncated) lines.push("  … truncated – raise maxNodes");

@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { call, readConfig, BridgeError } from "./bridge.js";
+import { call, readConfig, readInfo, BridgeError } from "./bridge.js";
 import { formatScreen, formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
 
 const server = new McpServer(
@@ -14,7 +14,7 @@ const server = new McpServer(
       "Workflow: sap_screen to see the current window (element ids like wnd[0]/usr/ctxtFIELD), " +
       "then sap_set_fields / sap_press / sap_send_key. Every action returns the resulting screen and status bar, " +
       "so do not call sap_screen again after an action. Always read the status bar: [E] = error, [W] = warning, " +
-      "[S] = success. Pop-ups appear as wnd[1], wnd[2]. ALV grids and trees show up as control=SapGridWrapper / " +
+      "[S] = success. Pop-ups appear as wnd[1], wnd[2]; their question and answer buttons are shown in a POPUP block – read it before answering, never guess. ALV grids and trees show up as control=SapGridWrapper / " +
       "SapTreeWrapper – read them with sap_read_grid / sap_read_tree; classic table controls (type TableControl) " +
       "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
       "save buttons) or changing anything outside development/customizing tasks.",
@@ -166,6 +166,27 @@ server.registerTool("sap_read_table", {
   },
   annotations: { readOnlyHint: true },
 }, async (a) => run(async () => formatTable(await call<Table>("table", { ...a, titleMode: "p2m" }))));
+
+server.registerTool("sap_reload_bridge", {
+  title: "Reload bridge",
+  description: "Reload scripts/bridge.js inside SAP GUI (after changing the bridge code) without the Scripting menu. " +
+    "Waits until the new bridge answers. The SAP GUI screen and session are not touched.",
+  inputSchema: {},
+}, async () => run(async () => {
+  const before = await readInfo();
+  const r = await call("reload");
+  for (let i = 0; i < 50; i++) {
+    await new Promise(res => setTimeout(res, 200));
+    try {
+      const now = await readInfo();
+      if (now.started !== before.started) {
+        const s = await call("status");
+        return `bridge reloaded from ${r.script}: ${before.version} → ${s.bridge}, port ${now.port}`;
+      }
+    } catch { /* bridge.json is being rewritten */ }
+  }
+  throw new BridgeError("bridge did not come back within 10 s – check ~/.sapgui-java-mcp/bridge.log (reload-error) or restart it from the Scripting menu");
+}));
 
 server.registerTool("sap_read_tree", {
   title: "Read tree",

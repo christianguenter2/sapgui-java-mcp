@@ -64,7 +64,7 @@ script can start a JDK `HttpServer` on loopback.
 | `sap_send_command` | OK-code | `session.sendCommand` |
 | `sap_read_table` ✅ | rows of a dynpro table control (paged, scrolls for rows off the page) | `GuiTableControl` – see §7 |
 | `sap_screenshot` | PNG of current window → path / base64 | `wnd.HardCopy(file, fmt)` |
-| `sap_close_popup` | confirm/cancel modal window | `wnd[1]` buttons / `sendVKey 0/12` |
+| `sap_close_popup` | confirm/cancel modal window | `wnd[1]` buttons / `sendVKey 0/12` – superseded: every screen of a modal window carries a POPUP block (texts + answer buttons with ids), answer with `sap_press` |
 | `sap_read_grid` / `sap_read_tree` | **v2, only if spike passes** (Personas wrappers) | `Personas GridView/Tree` |
 
 Every action tool returns the resulting `sap_screen` summary + status bar, so Claude
@@ -121,3 +121,22 @@ Tested on ZDISPLAY (item list 0500, G/L list 0600, overview 0705 ×2) and SE16H 
   the wrapper's `mScriptObject` field. Verified against a screenshot; `titleMode` on `/table`
   (`p2m` default, `wrapper`, `direct`, `m2p`, `wrapperM2p`, `personas`) + `debugTitles` keep the
   alternatives available.
+
+## 8. Pop-up text and bridge reload – findings 2026-11-04
+
+**Pop-up text.** SPO1 confirmations (`SAPLSPO1/0500`, e.g. ZPOST "Checking posting key") put
+the question into an HTML viewer; the scripting wrapper `SapBrowserWrapper` has no read method.
+Path that works: wrapper `mScriptObject` (= CET `GuiShell`) → `mJavaObject` (= `SapBrowser` bean)
+→ `mBrowser` (JxBrowser `Browser`) → `mainFrame().text()` (+ child frames). JxBrowser's
+implementation classes are not public → call through the `Browser`/`Frame` interfaces by reflection
+(GUI class loader). Failures are reported per step as `htmlErr`.
+For every modal window the bridge returns `popup {title, texts, buttons}`: HTML text, read-only text
+fields (`MESSTXT1` in information pop-ups), labels; buttons of `usr` and `tbar[0]` with ids. Verified:
+SPO1 question ("<key> does not exist. Do you want to create the key?") and SAPMSDYP information
+pop-up. HTML viewers in `wnd[0]` (Easy Access start page) also get an `html=` excerpt.
+
+**Reload.** `/reload` (MCP `sap_reload_bridge`, `sgb reload`) re-loads the bridge file in a new
+thread via Nashorn `load()`; the new instance stops the old server, no start dialog. The path is
+never taken from the request: Nashorn `__FILE__` (null when started from the Scripting menu) or
+`bridgeScript` in `~/.sapgui-java-mcp/config.json`. The GUI class loader is kept in a JVM system
+property so a reloaded bridge (no preset `application`) still reaches SAP GUI. Round trip ≈ 0.65 s.

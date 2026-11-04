@@ -19,6 +19,7 @@
 //   /tree     {session?, id, maxNodes?}   tree nodes (key, parent, text, folder, expanded)
 //   /table    {session?, id, firstRow?, maxRows?, columns?, skipEmpty?}   dynpro table control rows
 //             (scrolls the table for rows outside the visible page)
+//   /reload                               re-load this bridge file (path from __FILE__ or config bridgeScript)
 //   /stop                                 stop the bridge
 // Action endpoints return the resulting screen summary unless {"returnScreen": false}.
 //
@@ -27,7 +28,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.1.0";
+  var BRIDGE_VERSION = "0.2.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -43,6 +44,10 @@
   var StandardOpenOption = Java.type("java.nio.file.StandardOpenOption");
 
   var KEY = "sapgui-java-mcp.bridge";
+  var KEY_LOADER = "sapgui-java-mcp.loader";       // GUI class loader, survives /reload
+  var KEY_RELOADING = "sapgui-java-mcp.reloading"; // set while /reload runs → no start dialog
+  // path of this script (Nashorn __FILE__), needed for /reload; config.json "bridgeScript" overrides
+  var SELF = (typeof __FILE__ !== "undefined" && /\.js$/.test(String(__FILE__))) ? String(__FILE__) : null;
   var home = System.getProperty("user.home");
   var dir = Paths.get(home, ".sapgui-java-mcp");
   var infoFile = dir.resolve("bridge.json");
@@ -105,6 +110,9 @@
   var presetApp = (typeof application !== "undefined") ? application : null;
   // remember the GUI class loader while the preset object is valid
   var sapLoader = presetApp !== null ? presetApp.getClass().getClassLoader() : null;
+  // started via /reload: no preset 'application' → reuse the loader stored by the first start
+  if (sapLoader === null) sapLoader = System.getProperties().get(KEY_LOADER);
+  if (sapLoader !== null) System.getProperties().put(KEY_LOADER, sapLoader);
 
   function getApp() {
     if (presetApp !== null) {
@@ -186,6 +194,79 @@
     };
   }
 
+  // underlying GUI control object of a scripting wrapper (field mScriptObject), or null
+  function scriptObject(w) {
+    return tryCall(function () {
+      var cls = w.getClass();
+      while (cls !== null) {
+        try {
+          var f = cls.getDeclaredField("mScriptObject");
+          f.setAccessible(true);
+          return f.get(w);
+        } catch (e) { cls = cls.getSuperclass(); }
+      }
+      return null;
+    }, null);
+  }
+
+  function privateField(obj, name) {
+    var cls = obj.getClass();
+    while (cls !== null) {
+      try { var f = cls.getDeclaredField(name); f.setAccessible(true); return f.get(obj); }
+      catch (e) { cls = cls.getSuperclass(); }
+    }
+    return null;
+  }
+
+  function squash(s) { return str(s).replace(/ /g, " ").replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim(); }
+
+  // Rendered text of an HTML viewer (SapBrowserWrapper → SapBrowser.mBrowser = JxBrowser Browser).
+  // The scripting API has no read access; SPO1 confirmation pop-ups put their question here.
+  // JxBrowser implementation classes are not public → call through the public interfaces
+  // (reflection, classes from the GUI class loader). Returns {text} or {error: "<step>: …"}.
+  var jx = null;
+  function jxMethods(loader) {
+    if (jx !== null) return jx;
+    var B = loader.loadClass("com.teamdev.jxbrowser.browser.Browser");
+    var F = loader.loadClass("com.teamdev.jxbrowser.frame.Frame");
+    jx = { mainFrame: B.getMethod("mainFrame"), text: F.getMethod("text"), children: F.getMethod("children") };
+    return jx;
+  }
+  function htmlText(shell) {
+    var step = "scriptObject";
+    try {
+      var sb = scriptObject(shell);
+      if (sb === null) return { error: "no mScriptObject on " + shell.getClass().getName() };
+      // the wrapper's script object is the CET GuiShell; the SapBrowser bean is its mJavaObject
+      step = "shell.getObject";
+      var bean = privateField(sb, "mJavaObject");
+      if (bean !== null) sb = bean;
+      step = "mBrowser";
+      var br = privateField(sb, "mBrowser");
+      if (br === null) return { error: "no field mBrowser on " + sb.getClass().getName() };
+      step = "interfaces";
+      var m = jxMethods(sb.getClass().getClassLoader());
+      var parts = [], seen = 0;
+      function walkFrame(fr, depth) {
+        if (fr === null || depth > 4 || seen++ > 20) return;
+        step = "frame.text";
+        var t = squash(m.text.invoke(fr));
+        if (t !== "") parts.push(t);
+        step = "frame.children";
+        var kids = toList(m.children.invoke(fr));
+        for (var i = 0; i < kids.length; i++) walkFrame(kids[i], depth + 1);
+      }
+      step = "mainFrame";
+      var main = m.mainFrame.invoke(br);
+      walkFrame(main.isPresent() ? main.get() : null, 0);
+      return { text: parts.join("\n") };
+    } catch (e) {
+      var c = e;
+      try { while (c.getCause && c.getCause() !== null) c = c.getCause(); } catch (e2) { }
+      return { error: step + ": " + errText(c) };
+    }
+  }
+
   var INPUT_TYPES = { GuiTextField: 1, GuiCTextField: 1, GuiPasswordField: 1, GuiOKCodeField: 1, GuiComboBox: 1, GuiCheckBox: 1, GuiRadioButton: 1 };
   var SKIP_SUBTREE = { GuiMenuBar: 1 };
 
@@ -206,6 +287,11 @@
       d.control = str(n.getClass().getSimpleName());
       var st = tryCall(function () { return n.getSubtype(); }, null);
       if (st !== null) d.subtype = str(st);
+      if (d.control === "SapBrowserWrapper") {
+        var hr = htmlText(n);
+        if (hr.error) d.htmlError = hr.error;
+        else if (hr.text) d.html = hr.text.length > 1500 ? hr.text.substring(0, 1500) + " …" : hr.text;
+      }
       if (d.control === "SapGridWrapper") {
         d.rowCount = tryCall(function () { return Number(n.getRowCount()); }, undefined);
         d.title = tryCall(function () { return str(n.getTitle()); }, undefined);
@@ -247,7 +333,23 @@
     var activeWin = ses.findById(active);
     res.truncated = walkWindow(activeWin, opts, res.elements);
     res.statusBar = statusBar(ses, active);
+    if (active !== "wnd[0]") res.popup = popupSummary(activeWin, res.elements);
     return res;
+  }
+
+  // What a modal window says and which answers it offers. Texts come from HTML viewers (SPO1),
+  // read-only text fields (MESSTXT1.., SPOP-TEXTLINE..), labels and text edits; buttons with ids.
+  function popupSummary(win, elements) {
+    var texts = [], buttons = [];
+    for (var i = 0; i < elements.length; i++) {
+      var e = elements[i];
+      if (e.html) texts.push(e.html);
+      else if ((e.type === "GuiTextField" || e.type === "GuiCTextField") && e.changeable === false && e.text) texts.push(e.text);
+      else if (e.type === "GuiLabel" && e.text) texts.push(e.text);
+      else if (e.type === "GuiButton" && e.id.indexOf("/usr/") >= 0) buttons.push({ id: e.id, text: str(e.text || e.tooltip).trim() });
+      else if (e.type === "GuiButton" && /\/tbar\[0\]\/btn\[\d+\]$/.test(e.id)) buttons.push({ id: e.id, text: str(e.tooltip || e.text).trim() });
+    }
+    return { title: str(tryCall(function () { return win.getText(); }, "")), texts: texts, buttons: buttons };
   }
 
   // ----------------------------------------------------------- operations
@@ -365,21 +467,6 @@
       id: relId(g.getId()), title: str(tryCall(function () { return g.getTitle(); }, "")),
       rowCount: rowCount, firstRow: first, returned: rows.length, columns: colInfo, rows: rows
     };
-  }
-
-  // underlying GUI control object of a scripting wrapper (field mScriptObject), or null
-  function scriptObject(w) {
-    return tryCall(function () {
-      var cls = w.getClass();
-      while (cls !== null) {
-        try {
-          var f = cls.getDeclaredField("mScriptObject");
-          f.setAccessible(true);
-          return f.get(w);
-        } catch (e) { cls = cls.getSuperclass(); }
-      }
-      return null;
-    }, null);
   }
 
   // value of one table cell (text field, checkbox, combo, button, label …)
@@ -598,7 +685,26 @@
         var cfg = loadConfig();
         var res;
         if (path === "/status") res = opStatus();
-        else if (path === "/stop") {
+        else if (path === "/reload") {
+          // re-load THIS bridge file (fixed path, never taken from the request) in a new thread;
+          // the new instance stops this server like a manual restart does
+          var script = cfg.bridgeScript ? String(cfg.bridgeScript) : SELF;
+          if (script === null || !Files.isRegularFile(Paths.get(script)))
+            fail(409, "bridge script path unknown (" + script + ") – set \"bridgeScript\" in " + cfgFile + " or restart from the Scripting menu once");
+          res = { ok: true, reloading: true, script: script, version: BRIDGE_VERSION };
+          respond(ex, 200, res);
+          rec.status = 200;
+          new (Java.type("java.lang.Thread"))(function () {
+            try {
+              Java.type("java.lang.Thread").sleep(200);
+              System.setProperty(KEY_RELOADING, "X");
+              load(script);
+            } catch (e) {
+              audit({ event: "reload-error", error: errText(e) });
+            } finally { System.clearProperty(KEY_RELOADING); }
+          }).start();
+          return;
+        } else if (path === "/stop") {
           res = { ok: true, stopping: true };
           respond(ex, 200, res);
           rec.status = 200;
@@ -632,7 +738,7 @@
         try { respond(ex, code, { error: msg }); } catch (e2) { }
       } finally {
         rec.ms = Date.now() - t0;
-        if (rec.status !== 200 || WRITE_OPS[path] || path === "/stop") audit(rec);
+        if (rec.status !== 200 || WRITE_OPS[path] || path === "/stop" || path === "/reload") audit(rec);
       }
     }
   }));
@@ -644,12 +750,14 @@
   Files.createDirectories(dir);
   try { Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------")); } catch (e) { }
   writeText(infoFile, JSON.stringify({
-    port: port, token: tok, version: BRIDGE_VERSION,
+    port: port, token: tok, version: BRIDGE_VERSION, script: SELF,
     pid: Number(Java.type("java.lang.ProcessHandle").current().pid()),
     started: new Date().toISOString()
   }, null, 2) + "\n");
   chmod600(infoFile);
-  audit({ event: "start", port: port, version: BRIDGE_VERSION });
+  var reloaded = System.getProperty(KEY_RELOADING) !== null;
+  audit({ event: reloaded ? "reload" : "start", port: port, version: BRIDGE_VERSION, script: SELF });
+  if (reloaded) return;
 
   var msg = "sapgui-java-mcp bridge " + BRIDGE_VERSION + " listening on 127.0.0.1:" + port + "\n" + infoFile;
   try {

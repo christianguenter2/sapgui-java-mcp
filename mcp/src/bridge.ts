@@ -18,7 +18,7 @@ const NOT_RUNNING =
 
 interface BridgeInfo { port: number; token: string; version?: string; started?: string }
 
-async function readInfo(): Promise<BridgeInfo> {
+export async function readInfo(): Promise<BridgeInfo> {
   try {
     const info = JSON.parse(await readFile(INFO_FILE, "utf8")) as BridgeInfo;
     if (!info.port || !info.token) throw new Error("incomplete");
