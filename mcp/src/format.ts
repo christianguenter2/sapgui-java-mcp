@@ -71,6 +71,7 @@ export function formatScreen(s: Screen): string {
 export interface Grid {
   id: string; title: string; rowCount: number; firstRow: number; returned: number;
   columns: { name: string; title: string }[]; rows: Record<string, string>[];
+  emptyRows?: number[]; retried?: number;
 }
 
 export interface Table {
@@ -111,5 +112,8 @@ export function formatGrid(g: Grid): string {
   const lines = [head, "columns: " + g.columns.map(c => `${c.name}=${q(c.title)}`).join(", "), cols.join("\t")];
   for (const r of g.rows) lines.push(cols.map(c => (r[c] ?? "").replace(/[\t\n]/g, " ")).join("\t"));
   if (g.firstRow + g.returned < g.rowCount) lines.push(`… more rows: call again with firstRow=${g.firstRow + g.returned}`);
+  if (g.emptyRows?.length)
+    lines.push(`WARNING: rows ${g.emptyRows.join(",")} came back completely empty after scrolling and one retry – ` +
+      `the grid may not have loaded them; read them again with firstRow before relying on them`);
   return lines.join("\n");
 }

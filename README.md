@@ -51,11 +51,11 @@ screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_field
 | `sap_status` | bridge version, connections, sessions (system/client/user/transaction) |
 | `sap_screen` | read the current screen (`view`, `includeMenus`, `maxNodes` default 400) |
 | `sap_start_transaction` | start a transaction (`tcode`); checked against `deniedTransactions` |
-| `sap_set_fields` | set text/checkbox/radio/combo values (`fields: [{id, value, by?}]`) |
+| `sap_set_fields` | set text/checkbox/radio/combo values (`fields: [{id, value, by?}]`); optional `then` (`"Enter"`, `"Execute"`, … or `{press: id}`) sends it afterwards and returns the screen – one call per input step |
 | `sap_press` | press button, select tab / menu / radio (`id`) |
 | `sap_send_key` | named key (Enter, Back, Execute, Save, Cancel, PageDown, …) or numeric VKey; optional `window` |
 | `sap_send_command` | send an OK-code (`command`, e.g. `/nSE16N`) |
-| `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`) |
+| `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`); scrolls and waits for lazily loaded rows, warns about rows that stayed empty |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true) |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300) |
 | `sap_reload_bridge` | reload `bridge.js` inside SAP GUI and wait until the new bridge answers |

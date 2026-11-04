@@ -141,3 +141,13 @@ thread via Nashorn `load()`; the new instance stops the old server, no start dia
 never taken from the request: Nashorn `__FILE__` (null when started from the Scripting menu) or
 `bridgeScript` in `~/.sapgui-java-mcp/config.json`. The GUI class loader is kept in a JVM system
 property so a reloaded bridge (no preset `application`) still reaches SAP GUI. Round trip ≈ 0.65 s.
+
+## 9. ALV grid lazy loading – 2026-11-04
+
+`SapGridWrapper` rows outside the visible page are loaded from the server **asynchronously** after
+`setFirstVisibleRow`. Seen once on SE16H T001 (rows 47–69 empty), not reproducible later – a race.
+`/grid` now scrolls, then polls until the first row of the new page has content (≤ 1 s), gives
+completely empty rows a second pass, and returns the rest as `emptyRows` (MCP: WARNING line).
+"Empty" means *all* grid columns (`getColumnOrder()`) are empty, not just the requested ones – a
+real ALV row always has its key; checking only the requested columns gave false alarms on sparse
+columns (T001-STCEG) and cost 3 s of waiting. Total wait per request is capped at 3 s.

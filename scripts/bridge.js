@@ -477,23 +477,61 @@
       var name = str(cols[c]);
       colInfo.push({ name: name, title: str(tryCall(function () { return g.getDisplayedColumnTitle(name); }, "")) });
     }
-    var rows = [];
     var visible = Math.max(1, Number(tryCall(function () { return g.getVisibleRowCount(); }, 20)));
     var last = Math.min(rowCount, first + max);
-    for (var r = first; r < last; r++) {
-      // rows are loaded lazily – scroll the window when leaving the visible range
-      var fv = Number(tryCall(function () { return g.getFirstVisibleRow(); }, 0));
-      if (r < fv || r >= fv + visible) tryCall(function () { g.setFirstVisibleRow(r); return 0; }, 0);
-      var row = {};
+    var Thread = Java.type("java.lang.Thread");
+    var allCols = toList(tryCall(function () { return g.getColumnOrder(); }, null)).map(function (x) { return str(x); });
+
+    function readRow(r) {
+      var row = {}, any = false;
       for (var k = 0; k < colInfo.length; k++) {
         var cn = colInfo[k].name;
-        row[cn] = str(tryCall(function () { return g.getCellValue(r, cn); }, ""));
+        var v = str(tryCall(function () { return g.getCellValue(r, cn); }, ""));
+        if (v !== "") any = true;
+        row[cn] = v;
       }
-      rows.push(row);
+      // requested columns all empty: the row is only "loaded" if ANY grid column has content
+      // (a real ALV row always has its key) – otherwise genuinely empty columns cause false alarms
+      if (!any) {
+        for (var a = 0; a < allCols.length && !any; a++) {
+          var ac = allCols[a];
+          if (str(tryCall(function () { return g.getCellValue(r, ac); }, "")) !== "") any = true;
+        }
+      }
+      return { row: row, any: any };
+    }
+    // Rows are loaded lazily from the server when the grid scrolls, asynchronously: right after
+    // setFirstVisibleRow the cells may still be empty (seen once on SE16H T001, rows 47..69).
+    // Scroll, then wait until the first row of the new page has content (max ~1 s).
+    var waitBudget = 3000; // ms in total per request, so genuinely empty rows cannot stall the bridge
+    function scrollTo(r) {
+      tryCall(function () { g.setFirstVisibleRow(r); return 0; }, 0);
+      for (var w = 0; w < 20 && waitBudget > 0; w++) {
+        if (readRow(r).any) return;
+        Thread.sleep(50); waitBudget -= 50;
+      }
+    }
+
+    var rows = [], empty = [];
+    for (var r = first; r < last; r++) {
+      var fv = Number(tryCall(function () { return g.getFirstVisibleRow(); }, 0));
+      if (r < fv || r >= fv + visible) scrollTo(r);
+      var rr = readRow(r);
+      rows.push(rr.row);
+      if (!rr.any) empty.push(r);
+    }
+    // second chance for rows that are still completely empty
+    var stillEmpty = [];
+    for (var e = 0; e < empty.length; e++) {
+      var er = empty[e];
+      scrollTo(er);
+      var again = readRow(er);
+      if (again.any) rows[er - first] = again.row; else stillEmpty.push(er);
     }
     return {
       id: relId(g.getId()), title: str(tryCall(function () { return g.getTitle(); }, "")),
-      rowCount: rowCount, firstRow: first, returned: rows.length, columns: colInfo, rows: rows
+      rowCount: rowCount, firstRow: first, returned: rows.length, columns: colInfo, rows: rows,
+      emptyRows: stillEmpty, retried: empty.length
     };
   }
 

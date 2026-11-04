@@ -124,14 +124,20 @@ server.registerTool("sap_start_transaction", {
 
 server.registerTool("sap_set_fields", {
   title: "Set field values",
-  description: "Set one or more fields in order. Text fields take a string; checkboxes true/false; radio buttons are selected (value ignored); combo boxes take the key (or the visible value with by='value'). Does NOT send Enter – follow with sap_send_key.",
+  description: "Set one or more fields in order. Text fields take a string; checkboxes true/false; radio buttons are selected (value ignored); combo boxes take the key (or the visible value with by='value'). " +
+    "Optional 'then': a key (e.g. \"Enter\", \"Execute\") or {press: id} sent after the fields – returns the resulting screen like sap_send_key/sap_press, saving a round trip. " +
+    "Without 'then' nothing is sent and only the set values are returned.",
   inputSchema: {
     fields: z.array(z.object({
       id: z.string().describe("Element id from sap_screen, e.g. wnd[0]/usr/ctxtGD-TAB"),
       value: z.union([z.string(), z.boolean()]).optional(),
       by: z.enum(["key", "value"]).optional().describe("Combo boxes only."),
     })).min(1),
-    session, expect,
+    then: z.union([
+      z.enum(Object.keys(VKEYS) as [string, ...string[]]),
+      z.object({ press: z.string().describe("Button/tab id to press after setting the fields") }),
+    ]).optional().describe("Key or {press: id} to send after the fields (e.g. \"Enter\"). Save/F11 writes data – confirm with the user first."),
+    session, expect, view,
   },
 }, async (a) => run(async () => {
   const out: string[] = [];
@@ -140,7 +146,13 @@ server.registerTool("sap_set_fields", {
     const r = await call("set", { session: a.session, id: f.id, value: f.value ?? "", by: f.by, expect: ex });
     out.push(`${r.id} (${String(r.type).replace(/^Gui/, "")}) = ${JSON.stringify(r.value)}`);
   }
-  return out.join("\n");
+  if (a.then === undefined) return out.join("\n");
+  // the guard still applies: the fields did not change the dynpro, so the same expect holds
+  if (typeof a.then === "string") {
+    const vkey = VKEYS[a.then];
+    return withScreen(`${out.join("\n")}\nsent ${a.then} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, expect: ex }), a.view);
+  }
+  return withScreen(`${out.join("\n")}\npressed ${a.then.press}`, await call("press", { session: a.session, id: a.then.press, expect: ex }), a.view);
 }));
 
 server.registerTool("sap_press", {
