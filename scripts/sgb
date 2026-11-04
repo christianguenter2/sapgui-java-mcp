@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# sgb – curl client for the sapgui-java-mcp bridge
+#   sgb status
+#   sgb screen
+#   sgb tcode '{"tcode":"SE16N"}'
+#   sgb set   '{"id":"wnd[0]/usr/ctxtGD-TAB","value":"T000"}'
+#   sgb vkey  '{"vkey":8}'
+#   sgb grid  '{"id":"wnd[0]/usr/cntlRESULT_LIST/shellcont/shell","maxRows":10}'
+# Env: SGB_DIR (default ~/.sapgui-java-mcp)
+set -euo pipefail
+dir="${SGB_DIR:-$HOME/.sapgui-java-mcp}"
+info="$dir/bridge.json"
+[[ -f "$info" ]] || { echo "bridge not running ($info missing) – start scripts/bridge.js from the SAP GUI Scripting menu" >&2; exit 2; }
+port=$(jq -r .port "$info"); token=$(jq -r .token "$info")
+ep="${1:?endpoint (status|screen|set|press|vkey|tcode|command|grid|tree|stop)}"
+body="${2:-{\}}"
+curl -sS -X POST "http://127.0.0.1:$port/$ep" \
+  -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
+  --data "$body" -w '\n' | jq .

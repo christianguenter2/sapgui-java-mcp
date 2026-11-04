@@ -1,0 +1,123 @@
+# sapgui-java-mcp – outline
+
+MCP server that lets Claude drive **SAP GUI for Java 8.10 on Linux** through the
+GUI's built-in scripting API. Status: design draft (2026-11-04), not built.
+
+## 1. Facts established so far
+
+| Fact | Source |
+|---|---|
+| DEV `sapgui/user_scripting = TRUE` (since 2026-11-04); `_per_user`, `_set_readonly`, `_disable_recording`, `_force_notification` = FALSE | RFC `SPFL_PARAMETER_GET_VALUE` |
+| Installed client: SAP GUI for Java 8.10 rev 14, SapMachine 21 | `~/SAPClients/SAPGUI8.10rev14` |
+| Script engine: GraalJS if `org.graalvm.polyglot.Context` is on the classpath, else Nashorn (`JavaScript`). Install ships **Nashorn 15.7 only** → ES5.1 | `GuiJavaScriptInterpreter.getJSEngineName`, `jar/nashorn*S.jar` |
+| Preset script globals: `application`, `connection`, `session` | `GuiJavaScriptInterpreter.createNewScope` |
+| Script event hooks: `onStartRequest`, `onEndRequest`, `onSessionCreate`, `onSessionDelete`, `onHit`, `onError` | `GuiJavaScriptInterpreter.hasEventHandlers` |
+| Script folders: setting `scriptsDir` (default `<sapgui home>/scripts`), output `fileOutputDir` | `GuiScriptDirectories` |
+| API surface = Windows Scripting API object model: `findById`, `startTransaction`, `sendCommand`, `sendVKey`, `HardCopy` (screenshot), status bar `messageType/Id/Number`, `info.*` | `com/sap/platin/{base,r3}/api/scripting/*Wrapper` |
+| Controls have their own wrappers in the control jars: `advancedGrid.SapGridWrapper` (ALV: `getRowCount`, `getCellValue`, `getColumnTitles`, `setCurrentCell`, `pressToolbarButton`, `doubleClick`…), `tree.SapTreeWrapper` (`expandNode`, `getNodeTextByKey`, `selectNode`, `getItemText`…), plus TextEdit, ABAP editor, HTML, toolbar, calendar | control jars; tree seen live on Easy Access |
+| **Smoke test v2 on DEV (2026-11-04): all checks pass** – session DEV/100, `findById`, status bar, full tree walk; preset objects are normal Java objects (886 direct calls, 0 reflection); scripts run on a worker thread (`Thread-N`, not EDT); GUI calls work from a **background thread** and via `invokeAndWait`; loopback `ServerSocket` OK | `~/sapgui-java-smoke-test.txt` |
+| Scripting state is fixed at logon: a connection opened before RZ11 change stays `isDisabledByServer = true` (preset `session` is then the string "Scripting this object is not allowed by the server") | smoke test v2 first run |
+
+## 2. Architecture
+
+```
+Claude Code ──MCP stdio──▶ sapgui-java-mcp (Node/TS)
+                                │  HTTP/JSON, 127.0.0.1:<port>, Bearer token
+                                ▼
+                SAP GUI for Java JVM ── bridge.js (Nashorn, started from Scripting menu)
+                                │  com.sun.net.httpserver.HttpServer (JDK built-in)
+                                ▼
+                     application / connection / session wrappers
+```
+
+**Why in-process:** the scripting objects only exist inside the GUI JVM; there is
+no COM/IPC equivalent on Linux. Nashorn has full Java interop, so the bridge
+script can start a JDK `HttpServer` on loopback.
+
+### 2.1 bridge.js (inside the GUI)
+- Started once per GUI start from the Scripting menu (later: auto-start, see §6).
+- Binds `127.0.0.1:0`, writes `{port, token, pid}` to `~/.sapgui-java-mcp/bridge.json` (mode 600).
+- Every request: check `Authorization: Bearer <token>`, then run the operation
+  **on the thread the smoke test proves safe** (EDT via `invokeAndWait`, or the
+  scripting event queue), with a timeout.
+- Round-trip completion: register `onEndRequest` → resolve a latch, so
+  `press`/`sendVKey` return only after the server answered (replaces Windows' `session.Busy` polling).
+- Endpoints are a fixed operation set (below), **no generic `eval`** in the default build.
+
+### 2.2 sapgui-java-mcp (outside, Node + `@modelcontextprotocol/sdk`)
+- Reads `bridge.json`, health-checks, exposes MCP tools, maps errors to clear messages
+  ("bridge not running – start bridge.js from Scripting menu").
+- Guardrails: transaction allow-list / deny-list, system allow-list (SID+client), audit log
+  (JSONL: time, tool, args, result status), optional read-only mode.
+
+## 3. MCP tools (v1)
+
+| Tool | Does | Underlying API |
+|---|---|---|
+| `sap_status` | bridge up?, GUI version, connections + sessions | `application.getConnections()` … `info.*` |
+| `sap_session_info` | system, client, user, tcode, program, screen | `session.getInfo()` |
+| `sap_start_transaction` | `/n<tcode>` | `session.startTransaction` |
+| `sap_screen` | compact screen model: window title, fields (id, label, value, changeable), buttons, tabs, status bar, modal windows | tree walk of `wnd[n]` |
+| `sap_set_field` | set text / checkbox / radio / combo key | `findById(id).setText/setSelected/setKey` |
+| `sap_press` | press button / toolbar button / tab / menu | `press()`, `select()` |
+| `sap_send_vkey` | Enter, F3, F8, Ctrl+S … | `wnd.sendVKey(n)` |
+| `sap_send_command` | OK-code | `session.sendCommand` |
+| `sap_read_table` ✅ | rows of a dynpro table control (paged, scrolls for rows off the page) | `GuiTableControl` – see §7 |
+| `sap_screenshot` | PNG of current window → path / base64 | `wnd.HardCopy(file, fmt)` |
+| `sap_close_popup` | confirm/cancel modal window | `wnd[1]` buttons / `sendVKey 0/12` |
+| `sap_read_grid` / `sap_read_tree` | **v2, only if spike passes** (Personas wrappers) | `Personas GridView/Tree` |
+
+Every action tool returns the resulting `sap_screen` summary + status bar, so Claude
+sees the effect of each step without an extra call.
+
+## 4. Security
+
+- Loopback only, random port, 256-bit token, token file 600, bridge stops when GUI exits.
+- No generic eval endpoint by default (an eval endpoint = arbitrary code in a logged-in SAP session).
+- Allow-list DEV/100 only to start; refuse production SIDs by config.
+- Audit log of every write action.
+- The GUI's "a script is attaching" notification: keep it on for manual use; the bridge attaches once at start.
+
+## 5. Phases
+
+| Phase | Content | Exit criterion |
+|---|---|---|
+| 0 Smoke test | `scripts/sgj-smoke-test.js` | report shows session info, tree, thread result, socket OK |
+| 1 Bridge spike ✅ | bridge.js with `/status`, `/screen`, `/set`, `/press`, `/vkey`, `/tcode`, `/command`, `/grid`, `/tree`; curl-tested | **passed 2026-11-04**: SE16N → T000 → Enter → F8 → ALV grid 6 rows (matches SQL); wrappers stay valid after the start script ends; round trips 0.3–0.6 s |
+| 2 MCP server 🟡 | Node TS server (`mcp/`), 9 tools, compact text output, deniedTransactions | built + tested over MCP stdio 2026-11-04 (status, screen, grid, Back, set, Enter → `[E]` status E2/007 returned in action result, bridge-down error). Open: registration in Claude Code + SM30 run on `/XYZ/CFG_PARAM_V` |
+| 3 Controls | grid/tree/textedit via Personas wrappers or Java accessibility fallback | read an ALV result list |
+| 4 Comfort | auto-start bridge, reconnect, multi-session, screenshot tool | — |
+
+Estimate: phase 1 ≈ 1 day, phase 2 ≈ 1–2 days, phase 3 open (depends on spike).
+
+## 6. Open questions (answered by the smoke test or phase 1)
+
+1. ~~**Threading**~~ – answered: background threads and `invokeAndWait` both work for reads.
+   Still to verify for *actions* (press/sendVKey) – serialize all requests through one executor anyway.
+2. **Bridge lifetime** – does a thread/HttpServer started from a script survive after the
+   script returns, or does `cleanUp()` tear down the scope and invalidate wrappers?
+   → bridge must re-acquire `application` per request via `GuiApplication.currentApplication()` if needed.
+3. **Auto-start** – any settings key / command-line option to run a script at GUI start?
+   Fallback: a Java agent (`-javaagent` in the guistart JVM options) that calls the interpreter.
+4. ~~**Grid/tree**~~ – answered: `SapGridWrapper` / `SapTreeWrapper` exist and the tree is reachable
+   via `findById` (seen on Easy Access). Grid still to be seen live on an ALV list → move to phase 2.
+5. **Wait semantics** – is `onEndRequest` reliable for "screen ready" incl. modal popups?
+
+## 7. Table controls (`/table`, `sap_read_table`) – findings 2026-11-04
+
+Tested on ZDISPLAY (item list 0500, G/L list 0600, overview 0705 ×2) and SE16H selection criteria (T001).
+
+- Cells: `getCell(visibleRow, col)`; ids `<table>/<cell>[col,visibleRow]` – the visible row is
+  relative to the scroll position. Setting a cell via that id with `/set` works (SE16H `LOW[2,1]`).
+- **Data rows = vertical scrollbar `getMaximum()`** (SE16H T001: 82 = DD03L fields; one-line ZDISPLAY
+  lists: 1). `getRowCount()` also counts the empty lines below the data (123 / 16 / 15 / 5).
+- Rows outside the visible page: `getVerticalScrollbar().setPosition(n)` (server round trip), then
+  re-`findById` the table. 82 rows with one scroll ≈ 0.45 s.
+- A column may have no cell in some rows (SE16H row MANDT) → column metadata from the first row
+  that has a cell.
+- **`GuiTableColumnWrapper.getTitle()` is wrong when a line layout reorders columns** (ZDISPLAY layout
+  Z03): it calls `GuiTableControl.getPersonasColumnTitle(mCol)`, which applies `p2mColumn` again.
+  Correct title for presentation column c = `GuiTableControl.getColumnName(p2mColumn(c))`, read via
+  the wrapper's `mScriptObject` field. Verified against a screenshot; `titleMode` on `/table`
+  (`p2m` default, `wrapper`, `direct`, `m2p`, `wrapperM2p`, `personas`) + `debugTitles` keep the
+  alternatives available.
