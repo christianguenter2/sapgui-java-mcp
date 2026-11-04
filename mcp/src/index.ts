@@ -4,7 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { call, readConfig, readInfo, BridgeError } from "./bridge.js";
-import { formatScreen, formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
+import { formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
+import { renderScreen, View, VIEWS } from "./view.js";
 
 const server = new McpServer(
   { name: "sapgui-java", version: "0.1.0" },
@@ -12,8 +13,9 @@ const server = new McpServer(
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
       "Workflow: sap_screen to see the current window (element ids like wnd[0]/usr/ctxtFIELD), " +
-      "then sap_set_fields / sap_press / sap_send_key. Every action returns the resulting screen and status bar, " +
-      "so do not call sap_screen again after an action. Always read the status bar: [E] = error, [W] = warning, " +
+      "then sap_set_fields / sap_press / sap_send_key. Every action returns the resulting screen and status bar " +
+      "(by default only what changed on the same screen, or a compact view of a new screen), so do not call " +
+      "sap_screen again after an action; use view=full only when an element seems to be missing. Always read the status bar: [E] = error, [W] = warning, " +
       "[S] = success. Pop-ups appear as wnd[1], wnd[2]; their question and answer buttons are shown in a POPUP block – read it before answering, never guess. ALV grids and trees show up as control=SapGridWrapper / " +
       "SapTreeWrapper – read them with sap_read_grid / sap_read_tree; classic table controls (type TableControl) " +
       "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
@@ -34,8 +36,12 @@ async function run(fn: () => Promise<string>): Promise<Content> {
   }
 }
 
-function withScreen(head: string, r: { screen?: Screen }): string {
-  return r.screen ? `${head}\n${formatScreen(r.screen)}` : head;
+const view = z.enum(VIEWS).optional().describe(
+  "How much of the resulting screen to return: changed (default for actions – only what changed on the same " +
+  "screen, compact when a new screen appears), compact, status (header/status/pop-up only) or full.");
+
+function withScreen(head: string, r: { screen?: Screen }, v: View | undefined): string {
+  return r.screen ? `${head}\n${renderScreen(r.screen, v ?? "changed")}` : head;
 }
 
 async function checkTcode(tcode: string) {
@@ -75,17 +81,18 @@ server.registerTool("sap_screen", {
     session,
     includeMenus: z.boolean().optional().describe("Include the menu bar tree (large)."),
     maxNodes: z.number().int().min(20).max(3000).optional().describe("Element limit, default 400."),
+    view: z.enum(VIEWS).optional().describe("compact (default: toolbars in one line, labels merged, empty read-only fields omitted), changed, status or full"),
   },
   annotations: { readOnlyHint: true },
-}, async (a) => run(async () => formatScreen(await call<Screen>("screen", a))));
+}, async (a) => run(async () => renderScreen(await call<Screen>("screen", a), a.view ?? "compact")));
 
 server.registerTool("sap_start_transaction", {
   title: "Start transaction",
   description: "Start a transaction in the session (like /n<tcode>). Returns the new screen.",
-  inputSchema: { tcode: z.string().min(1).describe("Transaction code, e.g. SE16N"), session },
+  inputSchema: { tcode: z.string().min(1).describe("Transaction code, e.g. SE16N"), session, view },
 }, async (a) => run(async () => {
   await checkTcode(a.tcode);
-  return withScreen(`started ${a.tcode.toUpperCase()}`, await call("tcode", a));
+  return withScreen(`started ${a.tcode.toUpperCase()}`, await call("tcode", a), a.view);
 }));
 
 server.registerTool("sap_set_fields", {
@@ -111,8 +118,8 @@ server.registerTool("sap_set_fields", {
 server.registerTool("sap_press", {
   title: "Press button / select tab or menu",
   description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. Returns the resulting screen.",
-  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session },
-}, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", a))));
+  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view },
+}, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", a), a.view)));
 
 server.registerTool("sap_send_key", {
   title: "Send virtual key",
@@ -121,20 +128,20 @@ server.registerTool("sap_send_key", {
   inputSchema: {
     key: z.union([z.enum(Object.keys(VKEYS) as [string, ...string[]]), z.number().int().min(0).max(99)]),
     window: z.string().optional().describe("e.g. wnd[1] for a pop-up; default active window"),
-    session,
+    session, view,
   },
 }, async (a) => run(async () => {
   const vkey = typeof a.key === "number" ? a.key : VKEYS[a.key];
-  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window }));
+  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window }), a.view);
 }));
 
 server.registerTool("sap_send_command", {
   title: "Send OK-code",
   description: "Send a command to the OK-code field, e.g. '/nSE16N', '/o', '=BACK'. Returns the resulting screen.",
-  inputSchema: { command: z.string().min(1), session },
+  inputSchema: { command: z.string().min(1), session, view },
 }, async (a) => run(async () => {
   if (/^\/[nNoO]\w/.test(a.command)) await checkTcode(a.command);
-  return withScreen(`sent ${a.command}`, await call("command", a));
+  return withScreen(`sent ${a.command}`, await call("command", a), a.view);
 }));
 
 server.registerTool("sap_read_grid", {
