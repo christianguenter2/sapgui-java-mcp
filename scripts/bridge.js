@@ -27,12 +27,14 @@
 // Errors name the screen the session is on.
 //
 // Optional config ~/.sapgui-java-mcp/config.json:
-//   {"allowedSystems": ["DEV/100"], "readOnly": false, "bridgeScript": "<repo>/scripts/bridge.js"}
+//   {"allowedSystems": ["DEV/100"], "readOnly": false, "confirmWrites": true, "bridgeScript": "<repo>/scripts/bridge.js"}
+//   confirmWrites (default true): Save/Post (vkey 11, btn[11], Save/Post/Buchen buttons, =BU/=SAVE …)
+//   need {"confirm": true, "expect": …}, otherwise 428 and nothing is done
 //   (bridgeScript is needed for /reload; "deniedTransactions" is read by the MCP server)
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.3.0";
+  var BRIDGE_VERSION = "0.4.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -156,13 +158,14 @@
 
   function sessionInfo(ses) {
     var i = ses.getInfo();
-    return {
+    var r = {
       id: str(ses.getId()),
       system: str(i.getSystemName()), client: str(i.getClient()), user: str(i.getUser()),
       language: str(i.getLanguage()), transaction: str(i.getTransaction()),
       program: str(i.getProgram()), screen: Number(i.getScreenNumber()),
       appServer: str(i.getApplicationServer()), readOnly: !!i.isScriptingModeReadOnly()
     };
+    return r;
   }
 
   // "SE16H SAPLSE16N/120 wnd[0] \"General Table Display\"" – where the session is right now
@@ -187,6 +190,43 @@
     if (x.window !== undefined && str(x.window) !== win) bad.push("window " + x.window + " ≠ " + win);
     if (x.transaction !== undefined && str(x.transaction).toUpperCase() !== i.transaction.toUpperCase()) bad.push("transaction " + x.transaction + " ≠ " + i.transaction);
     if (bad.length) fail(409, "screen guard: " + bad.join(", ") + " – nothing was done. Session is on " + whereText(ses));
+  }
+
+  // Write gate: actions that save/post data. Returns a label ("press btn[11] \"Post\"") or null.
+  var SAVE_WORDS = /^\s*(save|post|buchen|sichern|speichern|enregistrer|comptabiliser)\b/i;
+  var SAVE_CODES = /^(=|\/)?(BU|SAVE|SICH|SPEI|POST|UPDA|\/11|11)$/i;
+  function writeIntent(ses, path, body) {
+    if (path === "/vkey") {
+      if (Number(body.vkey) === 11) return "vkey 11 (Ctrl+S)";
+      if (Number(body.vkey) === 0) {   // Enter with a save code typed into the OK-code field
+        var ok = str(tryCall(function () { return ses.findById("wnd[0]/tbar[0]/okcd").getText(); }, "")).trim();
+        if (ok !== "" && SAVE_CODES.test(ok)) return "Enter with OK-code " + ok;
+      }
+    }
+    if (path === "/command" && SAVE_CODES.test(str(body.command).trim())) return "OK-code " + str(body.command).trim();
+    if (path === "/press") {
+      var el = tryCall(function () { return findEl(ses, body.id); }, null);
+      if (el === null) return null;
+      var id = relId(el.getId());
+      var txt = str(tryCall(function () { return el.getText(); }, "")).trim();
+      var tip = str(tryCall(function () { return el.getTooltip(); }, "")).trim();
+      if (/\/tbar\[0\]\/btn\[11\]$/.test(id) || SAVE_WORDS.test(txt) || SAVE_WORDS.test(tip))
+        return "press " + id + " " + JSON.stringify(txt || tip);
+    }
+    return null;
+  }
+
+  function checkWrite(ses, cfg, path, body, rec) {
+    var w = writeIntent(ses, path, body);
+    if (w === null) return;
+    rec.writeAction = w;
+    if (cfg.confirmWrites === false) return;
+    if (!body.confirm)
+      fail(428, "write gate: " + w + " saves data – nothing was done. Ask the user, then repeat with confirm: true " +
+        "and expect (the current screen). Session is on " + whereText(ses));
+    if (!body.expect)
+      fail(428, "write gate: " + w + " is confirmed but has no expect – a confirmed write must name the screen it " +
+        "is meant for. Nothing was done. Session is on " + whereText(ses));
   }
 
   function checkAllowed(ses, cfg, isWrite) {
@@ -746,6 +786,7 @@
           try { body = JSON.parse(raw); } catch (pe) { fail(400, "invalid JSON body: " + str(pe.message || pe)); }
         }
         rec.body = {};
+        // (rec.writeAction is set by the write gate; every write is audited)
         for (var k in body) rec.body[k] = (/pass/i.test(str(body.id)) && k === "value") ? "***" : body[k];
 
         var cfg = loadConfig();
@@ -783,6 +824,7 @@
           rec.system = checkAllowed(ses, cfg, !!WRITE_OPS[path]);
           rec.system = rec.system.system + "/" + rec.system.client;
           if (path !== "/screen") checkExpect(ses, body);
+          checkWrite(ses, cfg, path, body, rec);
           switch (path) {
             case "/screen": res = screen(ses, body); break;
             case "/set": res = opSet(ses, body); break;
@@ -808,7 +850,7 @@
         try { respond(ex, code, { error: msg }); } catch (e2) { }
       } finally {
         rec.ms = Date.now() - t0;
-        if (rec.status !== 200 || WRITE_OPS[path] || path === "/stop" || path === "/reload") audit(rec);
+        if (rec.status !== 200 || WRITE_OPS[path] || rec.writeAction || path === "/stop" || path === "/reload") audit(rec);
       }
     }
   }));

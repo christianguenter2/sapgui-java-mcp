@@ -6,6 +6,7 @@ import { z } from "zod";
 import { call, readConfig, readInfo, BridgeError } from "./bridge.js";
 import { formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
+import { userFormats, cachedFormats } from "./formats.js";
 
 const server = new McpServer(
   { name: "sapgui-java", version: "0.1.0" },
@@ -19,7 +20,8 @@ const server = new McpServer(
       "[S] = success. Pop-ups appear as wnd[1], wnd[2]; their question and answer buttons are shown in a POPUP block – read it before answering, never guess. ALV grids and trees show up as control=SapGridWrapper / " +
       "SapTreeWrapper – read them with sap_read_grid / sap_read_tree; classic table controls (type TableControl) " +
       "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
-      "save buttons) or changing anything outside development/customizing tasks. Pass expect (e.g. \"SAPLXYZ/200\", " +
+      "save buttons) or changing anything outside development/customizing tasks; the write gate enforces this: " +
+      "Save/Post only run with confirm=true plus expect. Type amounts and dates in the user's formats (sap_user_formats, once per session). Pass expect (e.g. \"SAPLXYZ/200\", " +
       "copied from the last screen header) on every Save/Post and whenever the user may use the same session – " +
       "the action is then refused if the screen changed. Errors name the screen the session is on.",
   },
@@ -50,6 +52,10 @@ const expect = z.union([
     window: z.string().optional().describe("e.g. wnd[1]"), transaction: z.string().optional(),
   }),
 ]).optional().describe("Screen guard – refuse the action unless the session is on this screen. Use it for every write (Save/Post) and when the user may be working in the same session.");
+
+const confirm = z.boolean().optional().describe(
+  "Write gate: Save/Post (vkey 11, btn[11], Save/Post/Buchen buttons, OK-codes =BU/=SAVE …) are refused unless " +
+  "confirm=true AND expect is given. Set it only after the user approved this specific save/post.");
 
 type Expect = { program?: string; screen?: number; window?: string; transaction?: string };
 function parseExpect(x: z.infer<typeof expect>): Expect | undefined {
@@ -96,9 +102,26 @@ server.registerTool("sap_status", {
   for (const c of s.connections) {
     lines.push(`${c.id} ${JSON.stringify(c.description)} ${c.connectionString}${c.disabledByServer ? " – SCRIPTING DISABLED BY SERVER (reconnect after enabling)" : ""}`);
     for (const x of c.sessions) lines.push(x.error ? `  session error: ${x.error}` :
-      `  ${x.id.replace(/^\/app\//, "")}: ${x.system}/${x.client} ${x.user} ${x.language} | ${x.transaction} ${x.program}/${x.screen}${x.readOnly ? " (read-only)" : ""}`);
+      `  ${x.id.replace(/^\/app\//, "")}: ${x.system}/${x.client} ${x.user} ${x.language} | ${x.transaction} ${x.program}/${x.screen}${x.readOnly ? " (read-only)" : ""}` +
+      ((f) => f ? `\n    input formats: date ${f.date}, numbers ${f.decimal}, time ${f.time}` : "\n    input formats: unknown – call sap_user_formats")(cachedFormats(`${x.system}/${x.client}/${x.user}`)));
   }
   return lines.join("\n");
+}));
+
+server.registerTool("sap_user_formats", {
+  title: "User input formats",
+  description: "Date format, decimal notation and time format of the logged-on user (user defaults, SU3). " +
+    "Opens SU3 in a separate session, reads the Defaults tab and closes that session again – the current session is not touched. " +
+    "Cached per system/client/user; call it once before typing amounts or dates.",
+  inputSchema: { session, refresh: z.boolean().optional().describe("Read again instead of using the cache") },
+  annotations: { readOnlyHint: true },
+}, async (a) => run(async () => {
+  const f = await userFormats(a.session, a.refresh);
+  return `${f.user}: date ${f.date}, numbers ${f.decimal}, time ${f.time}` +
+    `${f.timeZone ? `, time zone ${f.timeZone}` : ""}${f.systemTimeZone ? ` (system ${f.systemTimeZone})` : ""}` +
+    `\nraw USR01 keys: DATFM=${JSON.stringify(f.raw.datfm)} DCPFM=${JSON.stringify(f.raw.dcpfm)} TIMEFM=${JSON.stringify(f.raw.timefm)}` +
+    `\ne.g. amount 2000.50 → ${f.decimal.startsWith("1.") ? "2000,50" : f.decimal.startsWith("1,") ? "2000.50" : "2000,50"}, ` +
+    `date 30 June 2026 → ${f.date.replace("DD", "30").replace("MM", "06").replace("YYYY", "2026")}`;
 }));
 
 server.registerTool("sap_screen", {
@@ -137,7 +160,7 @@ server.registerTool("sap_set_fields", {
       z.enum(Object.keys(VKEYS) as [string, ...string[]]),
       z.object({ press: z.string().describe("Button/tab id to press after setting the fields") }),
     ]).optional().describe("Key or {press: id} to send after the fields (e.g. \"Enter\"). Save/F11 writes data – confirm with the user first."),
-    session, expect, view,
+    session, expect, view, confirm,
   },
 }, async (a) => run(async () => {
   const out: string[] = [];
@@ -150,15 +173,15 @@ server.registerTool("sap_set_fields", {
   // the guard still applies: the fields did not change the dynpro, so the same expect holds
   if (typeof a.then === "string") {
     const vkey = VKEYS[a.then];
-    return withScreen(`${out.join("\n")}\nsent ${a.then} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, expect: ex }), a.view);
+    return withScreen(`${out.join("\n")}\nsent ${a.then} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, expect: ex, confirm: a.confirm }), a.view);
   }
-  return withScreen(`${out.join("\n")}\npressed ${a.then.press}`, await call("press", { session: a.session, id: a.then.press, expect: ex }), a.view);
+  return withScreen(`${out.join("\n")}\npressed ${a.then.press}`, await call("press", { session: a.session, id: a.then.press, expect: ex, confirm: a.confirm }), a.view);
 }));
 
 server.registerTool("sap_press", {
   title: "Press button / select tab or menu",
   description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. Returns the resulting screen.",
-  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view, expect },
+  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view, expect, confirm },
 }, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
 server.registerTool("sap_send_key", {
@@ -168,17 +191,17 @@ server.registerTool("sap_send_key", {
   inputSchema: {
     key: z.union([z.enum(Object.keys(VKEYS) as [string, ...string[]]), z.number().int().min(0).max(99)]),
     window: z.string().optional().describe("e.g. wnd[1] for a pop-up; default active window"),
-    session, view, expect,
+    session, view, expect, confirm,
   },
 }, async (a) => run(async () => {
   const vkey = typeof a.key === "number" ? a.key : VKEYS[a.key];
-  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window, expect: parseExpect(a.expect) }), a.view);
+  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window, expect: parseExpect(a.expect), confirm: a.confirm }), a.view);
 }));
 
 server.registerTool("sap_send_command", {
   title: "Send OK-code",
   description: "Send a command to the OK-code field, e.g. '/nSE16N', '/o', '=BACK'. Returns the resulting screen.",
-  inputSchema: { command: z.string().min(1), session, view, expect },
+  inputSchema: { command: z.string().min(1), session, view, expect, confirm },
 }, async (a) => run(async () => {
   if (/^\/[nNoO]\w/.test(a.command)) await checkTcode(a.command);
   return withScreen(`sent ${a.command}`, await call("command", { ...a, expect: parseExpect(a.expect) }), a.view);

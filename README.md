@@ -44,7 +44,7 @@ Env: `SAPGUI_BRIDGE_DIR` (default `~/.sapgui-java-mcp`), `SAPGUI_BRIDGE_TIMEOUT_
 
 All tools take an optional `session` (default `con[0]/ses[0]`). Action tools return the resulting
 screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_fields`, `sap_press`,
-`sap_send_key` and `sap_send_command` also take `expect` (screen guard, below).
+`sap_send_key` and `sap_send_command` also take `expect` (screen guard) and `confirm` (write gate), below.
 
 | Tool | Purpose |
 |---|---|
@@ -58,6 +58,7 @@ screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_field
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`); scrolls and waits for lazily loaded rows, warns about rows that stayed empty |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true) |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300) |
+| `sap_user_formats` | date format, decimal notation, time format of the user (SU3 defaults, read in a separate session that is closed again; cached) |
 | `sap_reload_bridge` | reload `bridge.js` inside SAP GUI and wait until the new bridge answers |
 
 ### Screen views (`view` parameter)
@@ -86,6 +87,18 @@ Session is on SE16H SAPLSE16N/120 wnd[0] "General Table Display"
 Use it on every Save/Post and whenever the user may work in the same session. All other errors also
 name the current screen (`element not found: … | session is on …`).
 
+### Write gate (`confirm` parameter)
+
+Save/Post – vkey 11 (Ctrl+S), `tbar[0]/btn[11]`, buttons whose text or tooltip starts with
+Save/Post/Buchen/Sichern/Speichern, OK-codes `=BU`, `=SAVE`, `/11` … (also typed into the OK-code
+field followed by Enter) – are refused with HTTP 428 unless the request has `confirm: true` **and**
+`expect`. Every write is logged in `bridge.log` (`writeAction`). Disable with `"confirmWrites": false`.
+
+```
+write gate: press wnd[0]/tbar[0]/btn[11] "Save" saves data – nothing was done. Ask the user,
+then repeat with confirm: true and expect (the current screen). Session is on SE16H SAPLSE16N/120 …
+```
+
 ### Pop-ups
 
 Modal windows (`wnd[1]`, `wnd[2]`) produce a POPUP block: title, texts (incl. the HTML text of SPO1
@@ -109,6 +122,7 @@ Details: outline [§7](docs/mcp-outline.md#7-table-controls-table-sap_read_table
   - `readOnly` – `true` rejects all write actions, default `false` (bridge)
   - `deniedTransactions` – tcodes `sap_start_transaction` refuses, e.g. `["SU01"]` (MCP server)
   - `bridgeScript` – absolute path of `bridge.js`, needed for reload
+  - `confirmWrites` – default `true`: Save/Post need `confirm` + `expect` (bridge)
 - `bridge.json` – port + token, rewritten on every bridge start, deleted on `/stop`
 - `bridge.log` – JSONL audit of all write actions and errors
 

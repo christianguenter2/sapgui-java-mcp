@@ -151,3 +151,21 @@ completely empty rows a second pass, and returns the rest as `emptyRows` (MCP: W
 "Empty" means *all* grid columns (`getColumnOrder()`) are empty, not just the requested ones – a
 real ALV row always has its key; checking only the requested columns gave false alarms on sparse
 columns (T001-STCEG) and cost 3 s of waiting. Total wait per request is capped at 3 s.
+
+## 10. User formats and write gate – 2026-11-04
+
+**User formats.** `GuiSessionInfo` (behind the scripting wrapper) has `getDateFormat()`,
+`getDecimalFormat()`, `getUserTimeZone()` – all empty in the Java GUI (probably Personas only). A first
+mapping of the empty DCPFM to "1.234.567,89" was right only by accident; empty must mean unknown.
+`sap_user_formats` reads SU3 → tab Defaults (`cmbSUID_ST_NODE_DEFAULTS-DATFM/-DCPFM/-TIMEFM`,
+`txtTTZCU-TZONESYS`) in a separate session (`/oSU3`, closed with `/i`), cached per system/client/user.
+DEV/100 TESTUSER: DATFM 1 (DD.MM.YYYY), DCPFM blank (combo key trimmed to "" → 1.234.567,89), TIMEFM 0.
+Watch out: `lbl…-DATFM` ends like the field – match on the field types, not on the name alone.
+
+**Write gate.** In the bridge (`writeIntent` + `checkWrite`), because only the bridge sees the
+button text at press time: vkey 11, `tbar[0]/btn[11]`, buttons/tooltips starting with
+Save/Post/Buchen/Sichern/Speichern/Enregistrer/Comptabiliser, OK-codes `=BU =SAVE =SICH =SPEI =POST
+=UPDA /11` via `/command` or typed into `okcd` + Enter. Without `confirm` → 428; `confirm` without
+`expect` → 428. Config `confirmWrites: false` turns it off. Tested on SE16H (all five variants refused,
+Enter unaffected). Known gaps: function codes behind menu entries and context menus, F-keys other
+than F11 that a program maps to saving, ALV toolbar buttons (`pressToolbarButton`) – not covered.

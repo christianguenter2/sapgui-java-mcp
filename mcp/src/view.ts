@@ -139,7 +139,9 @@ export function renderScreen(s: Screen, view: View = "compact"): string {
     const { lines } = compactLines(s, changed);
     const out = [...head, `changed on this screen (${changed.size} of ${s.elements.length} elements; view=compact for all):`];
     out.push(...(lines.length ? lines : ["(nothing changed)"]));
-    if (removed.length) out.push(`  removed: ${removed.slice(0, 20).join(", ")}${removed.length > 20 ? ` … +${removed.length - 20}` : ""}`);
+    if (removed.length) out.push(removed.length <= 3
+      ? `removed: ${removed.map(lastPart).join(", ")}`
+      : `removed: ${removed.length} elements (e.g. another tab or subscreen was replaced)`);
     return out.join("\n");
   }
 
