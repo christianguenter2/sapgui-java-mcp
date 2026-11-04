@@ -6,6 +6,10 @@
 #   sgb set   '{"id":"wnd[0]/usr/ctxtGD-TAB","value":"T000"}'
 #   sgb vkey  '{"vkey":8}'
 #   sgb grid  '{"id":"wnd[0]/usr/cntlRESULT_LIST/shellcont/shell","maxRows":10}'
+#   sgb table '{"id":"wnd[0]/usr/tblSAPLXYZCTRL_0500","maxRows":20}'
+#   sgb tree  '{"id":"<tree id from screen>"}'
+#   sgb vkey  '{"vkey":0,"expect":{"program":"SAPLSE16N","screen":120}}'   # screen guard
+#   sgb reload | sgb stop
 # Env: SGB_DIR (default ~/.sapgui-java-mcp)
 set -euo pipefail
 dir="${SGB_DIR:-$HOME/.sapgui-java-mcp}"

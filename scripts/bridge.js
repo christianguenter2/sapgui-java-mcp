@@ -22,13 +22,17 @@
 //   /reload                               re-load this bridge file (path from __FILE__ or config bridgeScript)
 //   /stop                                 stop the bridge
 // Action endpoints return the resulting screen summary unless {"returnScreen": false}.
+// Any endpoint except /screen accepts {"expect": {program?, screen?, window?, transaction?}}: if the
+// session is elsewhere the request fails with 409 and nothing is done (screen guard).
+// Errors name the screen the session is on.
 //
 // Optional config ~/.sapgui-java-mcp/config.json:
-//   {"allowedSystems": ["DEV/100"], "readOnly": false}
+//   {"allowedSystems": ["DEV/100"], "readOnly": false, "bridgeScript": "<repo>/scripts/bridge.js"}
+//   (bridgeScript is needed for /reload; "deniedTransactions" is read by the MCP server)
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.2.0";
+  var BRIDGE_VERSION = "0.3.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -159,6 +163,30 @@
       program: str(i.getProgram()), screen: Number(i.getScreenNumber()),
       appServer: str(i.getApplicationServer()), readOnly: !!i.isScriptingModeReadOnly()
     };
+  }
+
+  // "SE16H SAPLSE16N/120 wnd[0] \"General Table Display\"" – where the session is right now
+  function whereText(ses) {
+    return tryCall(function () {
+      var i = sessionInfo(ses);
+      var w = ses.getActiveWindow();
+      return i.transaction + " " + i.program + "/" + i.screen + " " + relId(w.getId()) + " " + JSON.stringify(str(w.getText()));
+    }, "(unknown)");
+  }
+
+  // Screen guard: body.expect = {program?, screen?, window?, transaction?}. Checked on the bridge's
+  // single request thread right before the action, so nothing can change the screen in between.
+  function checkExpect(ses, body) {
+    var x = body.expect;
+    if (!x) return;
+    var i = sessionInfo(ses);
+    var win = tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+    var bad = [];
+    if (x.program !== undefined && str(x.program).toUpperCase() !== i.program.toUpperCase()) bad.push("program " + x.program + " ≠ " + i.program);
+    if (x.screen !== undefined && Number(x.screen) !== i.screen) bad.push("screen " + x.screen + " ≠ " + i.screen);
+    if (x.window !== undefined && str(x.window) !== win) bad.push("window " + x.window + " ≠ " + win);
+    if (x.transaction !== undefined && str(x.transaction).toUpperCase() !== i.transaction.toUpperCase()) bad.push("transaction " + x.transaction + " ≠ " + i.transaction);
+    if (bad.length) fail(409, "screen guard: " + bad.join(", ") + " – nothing was done. Session is on " + whereText(ses));
   }
 
   function checkAllowed(ses, cfg, isWrite) {
@@ -716,6 +744,7 @@
           var ses = getSession(body);
           rec.system = checkAllowed(ses, cfg, !!WRITE_OPS[path]);
           rec.system = rec.system.system + "/" + rec.system.client;
+          if (path !== "/screen") checkExpect(ses, body);
           switch (path) {
             case "/screen": res = screen(ses, body); break;
             case "/set": res = opSet(ses, body); break;
@@ -734,6 +763,9 @@
       } catch (e) {
         var code = (e instanceof BridgeError) ? e.status : 500;
         var msg = (e instanceof BridgeError) ? e.message : errText(e);
+        // context for the caller: where the session is now (guard errors already say it)
+        if (typeof ses !== "undefined" && ses !== null && code !== 409 && code !== 401 && code !== 403 && msg.indexOf("Session is on") < 0)
+          msg += " | session is on " + whereText(ses);
         rec.status = code; rec.error = msg;
         try { respond(ex, code, { error: msg }); } catch (e2) { }
       } finally {

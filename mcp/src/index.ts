@@ -19,7 +19,9 @@ const server = new McpServer(
       "[S] = success. Pop-ups appear as wnd[1], wnd[2]; their question and answer buttons are shown in a POPUP block – read it before answering, never guess. ALV grids and trees show up as control=SapGridWrapper / " +
       "SapTreeWrapper – read them with sap_read_grid / sap_read_tree; classic table controls (type TableControl) " +
       "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
-      "save buttons) or changing anything outside development/customizing tasks.",
+      "save buttons) or changing anything outside development/customizing tasks. Pass expect (e.g. \"SAPLXYZ/200\", " +
+      "copied from the last screen header) on every Save/Post and whenever the user may use the same session – " +
+      "the action is then refused if the screen changed. Errors name the screen the session is on.",
   },
 );
 
@@ -39,6 +41,31 @@ async function run(fn: () => Promise<string>): Promise<Content> {
 const view = z.enum(VIEWS).optional().describe(
   "How much of the resulting screen to return: changed (default for actions – only what changed on the same " +
   "screen, compact when a new screen appears), compact, status (header/status/pop-up only) or full.");
+
+// Screen guard: the action is refused (nothing done) if the session is not on this screen.
+const expect = z.union([
+  z.string().describe('Short form as in the screen header: "SAPLXYZ/200", optionally with transaction and window: "ZPOST SAPLXYZ/200 wnd[0]"'),
+  z.object({
+    program: z.string().optional(), screen: z.number().int().optional(),
+    window: z.string().optional().describe("e.g. wnd[1]"), transaction: z.string().optional(),
+  }),
+]).optional().describe("Screen guard – refuse the action unless the session is on this screen. Use it for every write (Save/Post) and when the user may be working in the same session.");
+
+type Expect = { program?: string; screen?: number; window?: string; transaction?: string };
+function parseExpect(x: z.infer<typeof expect>): Expect | undefined {
+  if (x === undefined) return undefined;
+  if (typeof x !== "string") return x;
+  const r: Expect = {};
+  for (const tok of x.trim().split(/\s+/)) {
+    const m = /^([A-Z0-9_\/]+)\/(\d+)$/i.exec(tok);
+    if (m) { r.program = m[1]; r.screen = Number(m[2]); }
+    else if (/^wnd\[\d+\]$/.test(tok)) r.window = tok;
+    else if (tok) r.transaction = tok;
+  }
+  if (r.program === undefined && r.window === undefined && r.transaction === undefined)
+    throw new BridgeError(`cannot parse expect ${JSON.stringify(x)} – use "PROGRAM/DYNPRO", e.g. "SAPLXYZ/200"`);
+  return r;
+}
 
 function withScreen(head: string, r: { screen?: Screen }, v: View | undefined): string {
   return r.screen ? `${head}\n${renderScreen(r.screen, v ?? "changed")}` : head;
@@ -104,12 +131,13 @@ server.registerTool("sap_set_fields", {
       value: z.union([z.string(), z.boolean()]).optional(),
       by: z.enum(["key", "value"]).optional().describe("Combo boxes only."),
     })).min(1),
-    session,
+    session, expect,
   },
 }, async (a) => run(async () => {
   const out: string[] = [];
+  const ex = parseExpect(a.expect);
   for (const f of a.fields) {
-    const r = await call("set", { session: a.session, id: f.id, value: f.value ?? "", by: f.by });
+    const r = await call("set", { session: a.session, id: f.id, value: f.value ?? "", by: f.by, expect: ex });
     out.push(`${r.id} (${String(r.type).replace(/^Gui/, "")}) = ${JSON.stringify(r.value)}`);
   }
   return out.join("\n");
@@ -118,8 +146,8 @@ server.registerTool("sap_set_fields", {
 server.registerTool("sap_press", {
   title: "Press button / select tab or menu",
   description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. Returns the resulting screen.",
-  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view },
-}, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", a), a.view)));
+  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view, expect },
+}, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
 server.registerTool("sap_send_key", {
   title: "Send virtual key",
@@ -128,20 +156,20 @@ server.registerTool("sap_send_key", {
   inputSchema: {
     key: z.union([z.enum(Object.keys(VKEYS) as [string, ...string[]]), z.number().int().min(0).max(99)]),
     window: z.string().optional().describe("e.g. wnd[1] for a pop-up; default active window"),
-    session, view,
+    session, view, expect,
   },
 }, async (a) => run(async () => {
   const vkey = typeof a.key === "number" ? a.key : VKEYS[a.key];
-  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window }), a.view);
+  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window, expect: parseExpect(a.expect) }), a.view);
 }));
 
 server.registerTool("sap_send_command", {
   title: "Send OK-code",
   description: "Send a command to the OK-code field, e.g. '/nSE16N', '/o', '=BACK'. Returns the resulting screen.",
-  inputSchema: { command: z.string().min(1), session, view },
+  inputSchema: { command: z.string().min(1), session, view, expect },
 }, async (a) => run(async () => {
   if (/^\/[nNoO]\w/.test(a.command)) await checkTcode(a.command);
-  return withScreen(`sent ${a.command}`, await call("command", a), a.view);
+  return withScreen(`sent ${a.command}`, await call("command", { ...a, expect: parseExpect(a.expect) }), a.view);
 }));
 
 server.registerTool("sap_read_grid", {

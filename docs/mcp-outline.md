@@ -1,7 +1,7 @@
 # sapgui-java-mcp – outline
 
 MCP server that lets Claude drive **SAP GUI for Java 8.10 on Linux** through the
-GUI's built-in scripting API. Status: design draft (2026-11-04), not built.
+GUI's built-in scripting API. Status: built and in use against DEV/100 (2026-11-04); this file keeps the design and the findings.
 
 ## 1. Facts established so far
 
@@ -84,8 +84,9 @@ sees the effect of each step without an extra call.
 |---|---|---|
 | 0 Smoke test | `scripts/sgj-smoke-test.js` | report shows session info, tree, thread result, socket OK |
 | 1 Bridge spike ✅ | bridge.js with `/status`, `/screen`, `/set`, `/press`, `/vkey`, `/tcode`, `/command`, `/grid`, `/tree`; curl-tested | **passed 2026-11-04**: SE16N → T000 → Enter → F8 → ALV grid 6 rows (matches SQL); wrappers stay valid after the start script ends; round trips 0.3–0.6 s |
-| 2 MCP server 🟡 | Node TS server (`mcp/`), 9 tools, compact text output, deniedTransactions | built + tested over MCP stdio 2026-11-04 (status, screen, grid, Back, set, Enter → `[E]` status E2/007 returned in action result, bridge-down error). Open: registration in Claude Code + SM30 run on `/XYZ/CFG_PARAM_V` |
-| 3 Controls | grid/tree/textedit via Personas wrappers or Java accessibility fallback | read an ALV result list |
+| 2 MCP server ✅ | Node TS server (`mcp/`), 11 tools, compact text output, deniedTransactions | built + tested over MCP stdio 2026-11-04; registered in Claude Code (`claude mcp add --scope user sapgui-java …`) and used live (SE16H, ZPOST posting, ZDISPLAY). Open: SM30 run on `/XYZ/CFG_PARAM_V` |
+| 3 Controls 🟡 | ALV grid + tree via `SapGridWrapper`/`SapTreeWrapper` ✅, dynpro table controls `/table` ✅ (§7), HTML viewer text ✅ (§8); textedit open | read an ALV result list ✅ |
+| 3a Agent ergonomics ✅ | pop-up text (§8), self-reload `/reload` (§8), screen views compact/changed/status/full (−71 % / −94 % on ZPOST), screen guard `expect` + screen context in errors | 2026-11-04 |
 | 4 Comfort | auto-start bridge, reconnect, multi-session, screenshot tool | — |
 
 Estimate: phase 1 ≈ 1 day, phase 2 ≈ 1–2 days, phase 3 open (depends on spike).
