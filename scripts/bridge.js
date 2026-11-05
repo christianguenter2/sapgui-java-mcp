@@ -506,6 +506,13 @@
     switch (type) {
       case "GuiButton": el.press(); break;
       case "GuiTab": case "GuiMenu": case "GuiRadioButton": el.select(); break;
+      // list output (lbl[col,row]) and fields: put the cursor there and double-click (F2) –
+      // that is how classic lists (e.g. RSWBO052, SE03 tools) select a line
+      case "GuiLabel": case "GuiTextField": case "GuiCTextField":
+        el.setFocus();
+        ses.findById(relId(el.getId()).replace(/^(wnd\[\d+\]).*$/, "$1")).sendVKey(2);
+        type = type + " (focus + F2)";
+        break;
       default: fail(400, "cannot press " + type + " (" + relId(el.getId()) + ") – use /grid or /tree for controls");
     }
     return after(ses, body, { ok: true, id: str(body.id), type: type });

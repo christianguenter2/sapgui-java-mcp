@@ -183,3 +183,18 @@ Tested without committing anything: ZPOST "create the key?" Yes/Enter refused, C
 Delete refused, "Save changes?" Yes refused, No free (DB: no key, no parameter created).
 Still not covered: function codes behind menu entries and context menus, F-keys other than F11 that a
 program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
+
+## 11. Lists, column trees, SE54 – 2026-11-05
+
+- **Classic lists** (`lbl[col,row]`, e.g. RSWBO052 "Change Object Directory Entries"): a line is picked
+  by cursor + double-click. `/press` on a `GuiLabel` / text field now does `setFocus()` + F2 on its window.
+- **Column trees** (SE03 tool tree): `sap_read_tree` returns only node keys (here the report names,
+  e.g. RSWBO052); the texts live in item columns, which `getNodeTextByKey` does not return. Open.
+- **SE54 leftover** `/XYZ/CFG_PARAM`: TVDIR pointed to function group `/XYZ/CFG_PARAM_M`, whose main
+  program no longer existed → SE54 offered only Create, menu Change/Delete disabled. Cleaned up via the
+  initial screen's "Generated Objects" Delete (`btn*VIMDYNFLDS-PUSH_DELE` – the `*` one; the first
+  Delete belongs to "ABAP Dictionary"): maintenance module, TVDIR, OBJH type S removed (TDDAT went
+  with it); OBJH type C (view cluster) and the table kept. Recorded in <request> / task <request>.
+  The orphaned TADIR `R3TR FUGR /XYZ/CFG_PARAM_M` stays (RSWBO052 cannot delete entries; SAP: TK/233
+  "object does not exist"); it is in <request>, so the import deletes it in the target as well.
+- The write gate caught the menu entry "Delete" too (it reads the element text for every press).

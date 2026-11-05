@@ -180,7 +180,7 @@ server.registerTool("sap_set_fields", {
 
 server.registerTool("sap_press", {
   title: "Press button / select tab or menu",
-  description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. Returns the resulting screen.",
+  description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. On a list line (lbl[col,row]) or a field it sets the cursor there and double-clicks (F2), e.g. to pick a line in a classic list. Returns the resulting screen.",
   inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view, expect, confirm },
 }, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
