@@ -1172,14 +1172,22 @@
   function ctxPopup(w) {
     var sh = scriptObject(w);
     if (sh === null) return null;
-    var pm = privateField(sh, "mLastContextMenu");
-    if (pm !== null) return pm;
     var jo = privateField(sh, "mJavaObject");
-    // toolbar controls: the menu of a menu button (SapToolBar.mLastMenuVisible)
-    var tbm = jo === null ? null : privateField(jo, "mLastMenuVisible");
-    if (tbm === null) tbm = privateField(sh, "mLastMenuVisible");
-    if (tbm !== null) return tbm;
-    return jo === null ? null : tryCall(function () { return jo.getContextMenu(); }, null);
+    // candidates in the order GuiShell.selectContextMenuItem uses (mLastContextMenu, then the control's
+    // own menu), plus toolbar controls' SapToolBar.mLastMenuVisible. The fields keep the LAST menu,
+    // also after it closed – a stale one hid the open menu of another field (live test, 2026-11-05),
+    // so the visible candidate wins; without one, the first in GuiShell's order.
+    var cands = [privateField(sh, "mLastContextMenu"),
+      jo === null ? null : privateField(jo, "mLastMenuVisible"),
+      jo === null ? null : tryCall(function () { return jo.getContextMenu(); }, null)];
+    var first = null;
+    for (var i = 0; i < cands.length; i++) {
+      var c = cands[i];
+      if (c === null) continue;
+      if (first === null) first = c;
+      if (tryCall(function () { return c.isVisible(); }, false)) return c;
+    }
+    return first;
   }
 
   function ctxMenuOpen(w) {

@@ -15,6 +15,11 @@ All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP s
   entries refused with the list), `submit: true` submits an input field and returns the screen.
 - Live test: SE80 step (object type + name, object list, toolbar buttons and menu, gate).
 
+### Fixed
+- Context and toolbar menus: the open menu is found among all candidate fields by visibility. The
+  fields keep the last menu after it closed, and a stale one hid the open menu now and then ("no
+  context menu appeared" in the grid; in SE80 the real menu stayed open and an entry got selected).
+
 ## [0.13.0] – 2026-11-05
 
 ### Changed

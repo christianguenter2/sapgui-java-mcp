@@ -429,6 +429,13 @@ and offered to create "Class/Interface RSPARAM". `selected()` afterwards fires t
 **Input field controls** (`SapInputFieldWrapper`): `setText()`, `submit()` (= Enter in the field: SE80
 shows the object). `getLabelText()` was empty in SE80.
 
+**Stale menus.** `GuiShell.mLastContextMenu`, `SapToolBar.mLastMenuVisible` and the control's
+`getContextMenu()` keep the LAST menu after it closed. With the toolbar candidate added, the live
+test failed intermittently (3 of ~9 runs): the grid's second context menu "did not appear", and in
+SE80 the Favorites menu "did not appear" while "Edit Favorites" opened – the lookup returned a stale,
+invisible menu, missed the open one and left it open. `ctxPopup` now returns the visible candidate,
+else the first in GuiShell's order; 6 runs in a row 10/10 afterwards.
+
 Verified (A4H/001, SE80): Program + RSPARAM submitted → object list shows RSPARAM; Favorites menu
 listed (`WB_BOOKMARK_CREATE`, `WB_BOOKMARKS_EDIT`) and Edit… opened its pop-up; unknown button,
 unknown menu entry and an unknown combo key refused with the valid ids; `WB_DELETE` refused by the gate.
