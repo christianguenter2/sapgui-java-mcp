@@ -45,7 +45,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.12.0";
+  var BRIDGE_VERSION = "0.13.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -233,9 +233,21 @@
     return { window: act, title: p.title, text: (p.title + "\n" + p.texts.join("\n")).replace(/\s+/g, " ").trim() };
   }
 
+  function isWriteLabel(t) { return SAVE_WORDS.test(t) || COMMIT_WORDS.test(t); }
+
   function writeIntent(ses, path, body) {
     if (path === "/vkey") {
       if (Number(body.vkey) === 11) return "vkey 11 (Ctrl+S)";
+      // any other key: what it triggers on this screen (programs map e.g. F5 or Shift+F2 to Post);
+      // Enter (sent all the time) only through its toolbar button, not the whole menu bar
+      var vk = Number(body.vkey) | 0;
+      var vwid = body.window ? str(body.window) : tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+      var bound = vk === 0
+        ? vkeyLabels(ses, vwid, 0, true)
+        : vkeyLabels(ses, vwid, vk, false);
+      for (var bi = 0; bi < bound.length; bi++)
+        if (isWriteLabel(bound[bi].text) || isWriteLabel(bound[bi].tooltip))
+          return "vkey " + vk + " = " + bound[bi].id + " " + JSON.stringify(bound[bi].text || bound[bi].tooltip);
       if (Number(body.vkey) === 0) {   // Enter with a save code typed into the OK-code field
         var ok = str(tryCall(function () { return ses.findById("wnd[0]/tbar[0]/okcd").getText(); }, "")).trim();
         if (ok !== "" && SAVE_CODES.test(ok)) return "Enter with OK-code " + ok;
@@ -263,6 +275,10 @@
       var id = relId(el.getId());
       var txt = str(tryCall(function () { return el.getText(); }, "")).trim();
       var tip = str(tryCall(function () { return el.getTooltip(); }, "")).trim();
+      // bound to Ctrl+S (accelerator = vkey 11): Save in any logon language, also as a menu entry
+      var accSo = scriptObject(el);
+      var acc = accSo === null ? -1 : Number(tryCall(function () { return accSo.getAccelerator(); }, -1));
+      if (acc === 11) return "press " + id + " " + JSON.stringify(txt || tip) + " (Ctrl+S)";
       if (/\/tbar\[0\]\/btn\[11\]$/.test(id) || SAVE_WORDS.test(txt) || SAVE_WORDS.test(tip) ||
           COMMIT_WORDS.test(txt) || COMMIT_WORDS.test(tip))
         return "press " + id + " " + JSON.stringify(txt || tip);
@@ -725,7 +741,43 @@
     return after(ses, body, { ok: true, id: str(body.id), type: type });
   }
 
+  // What a virtual key does on this screen: the front end does not know function codes (the server
+  // maps menu entries and keys to them), but buttons and menu entries carry their key –
+  // tbar[0]/tbar[1] buttons have id btn[<vkey>], menu entries (GuiMenu) and buttons know
+  // getAccelerator() = vkey. Returns [{id, text, tooltip}] of everything bound to vkey in window wid.
+  function vkeyLabels(ses, wid, vkey, buttonsOnly) {
+    var out = [], seen = {};
+    function add(el) {
+      var id = relId(el.getId());
+      if (seen[id]) return;
+      seen[id] = 1;
+      out.push({ id: id, text: str(tryCall(function () { return el.getText(); }, "")).trim(),
+        tooltip: str(tryCall(function () { return el.getTooltip(); }, "")).trim() });
+    }
+    for (var t = 0; t <= 1; t++) {
+      var b = tryCall(function () { return ses.findById(wid + "/tbar[" + t + "]/btn[" + vkey + "]"); }, null);
+      if (b !== null) add(b);
+    }
+    var mbar = buttonsOnly ? null : tryCall(function () { return ses.findById(wid + "/mbar"); }, null);
+    (function walk(node, depth) {
+      if (node === null || depth > 4) return;
+      var kids = toList(tryCall(function () { return node.getChildren(); }, null));
+      for (var i = 0; i < kids.length; i++) {
+        var k = kids[i];
+        var so = scriptObject(k);
+        var acc = so === null ? -1 : Number(tryCall(function () { return so.getAccelerator(); }, -1));
+        if (acc === vkey) add(k);
+        walk(k, depth + 1);
+      }
+    })(mbar, 0);
+    return out;
+  }
+
   function opVKey(ses, body) {
+    if (body.debug && body.vkey !== undefined) {           // which buttons/menu entries the key triggers
+      var wd = body.window ? str(body.window) : tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+      return { ok: true, window: wd, vkey: Number(body.vkey), bound: vkeyLabels(ses, wd, Number(body.vkey)), sent: false };
+    }
     if (body.vkey === undefined) fail(400, "missing 'vkey'");
     var wid = body.window ? str(body.window) : tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
     var win = findEl(ses, wid);

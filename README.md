@@ -10,10 +10,11 @@ The agent works in **its own SAP GUI session** next to yours, every Save/Post ne
 confirmation, and screens come back in a compact, token-saving form. Design notes and everything
 learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
-> **Status: experimental (0.12.0).** Use it on **development, test and trial systems only** – never on
+> **Status: experimental (0.13.0).** Use it on **development, test and trial systems only** – never on
 > production. An AI agent drives a logged-on SAP GUI with your user's authorizations. The write gate
 > (`confirm`) is a **heuristic** based on button texts, OK-codes and pop-up questions in English and
-> German; it does not catch every write (function codes a program maps to saving, for example), and it is no substitute for
+> German; it does not catch every write (a menu entry or key whose text is not a save/commit word in
+> English or German, for example – the front end never sees function codes), and it is no substitute for
 > authorizations and your own review. You use this software at your own risk (see [LICENSE](LICENSE)).
 
 > **Internals.** SAP GUI's public scripting API leaves gaps (pop-up HTML text, some tree texts, table
@@ -157,6 +158,9 @@ Refused with HTTP 428 unless the request has `confirm: true` **and** `expect`:
 - Save/Post: vkey 11, `tbar[0]/btn[11]`, buttons/menu entries whose text or tooltip starts with
   Save/Post/Buchen/Sichern/Speichern, OK-codes `=BU =SAVE =SICH =SPEI =POST =UPDA /11` (also typed into
   the OK-code field + Enter);
+- keys bound to such a function on the current screen: for any F-key (Shift/Ctrl combinations too)
+  the gate reads the toolbar button and menu entries the key triggers (e.g. Shift+F2 = "Delete…");
+  buttons and menu entries bound to Ctrl+S are Save in any logon language;
 - actions that commit at once: buttons/menu entries Close/Release/Reverse/Delete (+ German);
   Yes or Enter in a pop-up whose question is about saving, posting, closing, deleting, reversing,
   releasing or creating; ALV toolbar buttons, toolbar menu entries and grid/tree context menu entries
@@ -263,7 +267,7 @@ an agent session ended by SAP (`/i`), screenshot. `--abap-program` (a program of
 ## Status
 
 Experimental, in use against development and trial systems since 2026-11-04. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§19.
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§21.
 
 ## License
 

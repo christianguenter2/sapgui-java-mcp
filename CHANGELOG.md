@@ -3,6 +3,17 @@
 All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP server
 (`mcp/package.json`) and this file in lockstep; CI checks that they match.
 
+## [0.13.0] – 2026-11-05
+
+### Changed
+- Write gate: every virtual key is checked for what it triggers on the current screen – the toolbar
+  button `btn[<vkey>]` and the menu entries whose accelerator is that key – so a program's F5 =
+  "Post" or Shift+F2 = "Delete…" needs `confirm` + `expect` like Save (Enter: toolbar button only).
+- Write gate: buttons and menu entries bound to Ctrl+S count as Save whatever their text (logon
+  languages other than English/German).
+- `sap_send_key` names Shift+F1…F12, Ctrl+F1…F12, Ctrl+Shift+F1…F12 (vkeys 13–48).
+- Live test: Shift+F2 (Delete…) on SE38, menu Program > Save in change mode.
+
 ## [0.12.0] – 2026-11-05
 
 ### Added

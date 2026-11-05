@@ -386,3 +386,23 @@ nothing saved. Found on its first runs:
   that error, since SAP reuses session ids.
 A4H/001 run: 9/9 in about 9 s.
 
+## 21. Write gate: keys and menu entries – 2026-11-05
+
+Open since §10: function codes behind menu entries, and F-keys other than F11 that a program maps to
+saving. **The front end has no function codes**: `GuiMenu` and `GuiButton` (r3.control) carry text,
+tooltip and `getAccelerator()` but no code – the server maps a selected menu entry or key to its
+function code. What the front end does know is the **key binding**: `getAccelerator()` is the vkey
+(verified on the SE38 change editor: 11 = Save in the toolbar and Program > Save, 26 = Check / Syntax,
+27 = Activate, 8 = Direct Processing, 5 = Text Elements, 3 = Back), and the toolbar buttons of
+`tbar[0]`/`tbar[1]` have the id `btn[<vkey>]`.
+
+So the gate now resolves a key to its labels (`vkeyLabels`: `btn[<vkey>]` in both toolbars + every
+`mbar` entry with that accelerator) and checks them against SAVE_WORDS/COMMIT_WORDS – Shift+F2 on the
+SE38 initial screen is "Delete…" → refused. Enter (vkey 0) only checks its toolbar button (sent all
+the time; the menu walk costs about 5 ms). `/press` on any element whose accelerator is 11 counts as
+Save – a non-English "Save" menu entry is caught without knowing the word. `/vkey` with `debug: true`
+lists what the key is bound to without sending it (the gate still applies).
+
+Still heuristic: a menu entry or key whose label is not a save/commit word (in English or German)
+and is not bound to Ctrl+S passes – function codes are invisible to the front end.
+

@@ -12,7 +12,7 @@ import { userFormats, cachedFormats } from "./formats.js";
 import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
 
 const server = new McpServer(
-  { name: "sapgui-java", version: "0.12.0" },
+  { name: "sapgui-java", version: "0.13.0" },
   {
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
@@ -91,6 +91,10 @@ const VKEYS: Record<string, number> = {
   F10: 10, F11: 11, Save: 11, F12: 12, Cancel: 12, "Shift+F3": 15, Exit: 15,
   "Ctrl+F": 71, Find: 71, PageUp: 81, PageDown: 82, "Ctrl+PageUp": 80, "Ctrl+PageDown": 83,
 };
+// SAP vkeys 13–24 = Shift+F1–F12, 25–36 = Ctrl+F1–F12, 37–48 = Ctrl+Shift+F1–F12
+for (let i = 1; i <= 12; i++) {
+  VKEYS[`Shift+F${i}`] = 12 + i; VKEYS[`Ctrl+F${i}`] = 24 + i; VKEYS[`Ctrl+Shift+F${i}`] = 36 + i;
+}
 
 // ----------------------------------------------------------------- tools
 server.registerTool("sap_status", {
@@ -242,7 +246,8 @@ server.registerTool("sap_press", {
 server.registerTool("sap_send_key", {
   title: "Send virtual key",
   description: "Send a key to the active window (or 'window'). Named keys: " + Object.keys(VKEYS).join(", ") +
-    ". Or pass a numeric SAP VKey. Save/F11 writes data – confirm with the user first. Returns the resulting screen.",
+    ". Or pass a numeric SAP VKey. Save/F11 writes data – confirm with the user first; so do keys this screen binds to " +
+    "save/post/delete/release … (the write gate checks the button or menu entry behind the key). Returns the resulting screen.",
   inputSchema: {
     key: z.union([z.enum(Object.keys(VKEYS) as [string, ...string[]]), z.number().int().min(0).max(99)]),
     window: z.string().optional().describe("e.g. wnd[1] for a pop-up; default active window"),

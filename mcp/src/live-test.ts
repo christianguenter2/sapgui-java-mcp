@@ -76,7 +76,12 @@ step("status: bridge version matches the MCP server", async () => {
 
 let tree = "";
 step("Easy Access tree: read, node context menu, write gate", async () => {
-  ok(await tool("sap_start_transaction", { tcode: "SESSION_MANAGER", view: "status" }), "SESSION_MANAGER");
+  // "/n" ends the current transaction and shows SAP Easy Access (SESSION_MANAGER cannot be started
+  // as a transaction from every screen – "Cannot start transaction SESSION_MANAGER" from SE38)
+  const n = await tool("sap_send_command", { command: "/n", view: "compact" });
+  ok(n, "/n");
+  // some systems show the start screen S000 first ("Start SAP Easy Access" button)
+  if (/btnSTARTBUTTON/.test(n.text)) ok(await tool("sap_press", { id: "wnd[0]/usr/btnSTARTBUTTON", view: "status" }), "Start SAP Easy Access");
   tree = await findControl("SapTreeWrapper");
   const t = await tool("sap_read_tree", { id: tree, maxNodes: 50 });
   ok(t, "sap_read_tree");
@@ -126,8 +131,11 @@ step("table display: ALV grid, context menu", async () => {
   return disabled ? `disabled entry ${disabled[1]} refused` : "no disabled entry to test";
 });
 
-step("ABAP editor (display): read, write refused", async () => {
+step("ABAP editor (display): read, write refused; keys bound to Delete gated", async () => {
   ok(await tool("sap_start_transaction", { tcode: "SE38", view: "status" }), "SE38");
+  // Shift+F2 on the SE38 initial screen is "Delete..." – the gate reads what the key is bound to
+  refused(await tool("sap_send_key", { key: "Shift+F2", view: "status" }), /write gate: vkey 14 = /, "Shift+F2 (Delete...)");
+  ok(await tool("sap_send_key", { key: "Enter", view: "status" }), "Enter stays free");
   const d = await tool("sap_set_fields", { fields: [{ id: "wnd[0]/usr/ctxtRS38M-PROGRAMM", value: "RSPARAM" }], then: { press: "wnd[0]/usr/btnSHOP" }, view: "compact" });
   ok(d, "display RSPARAM");
   const ed = controlId(d.text, "SapAbapEditorWrapper");
@@ -147,6 +155,8 @@ step("ABAP editor (change mode, --abap-program): insert, Check, leave without sa
   ok(c, `change ${abapProgram}`);
   check(/lines=\d+ editable/.test(c.text), "editor not in change mode (pop-up, lock or original language?)", c);
   const ed = controlId(c.text, "SapAbapEditorWrapper")!;
+  // Program > Save in the menu bar: gated by its accelerator (Ctrl+S), whatever the logon language
+  refused(await tool("sap_press", { id: "wnd[0]/mbar/menu[0]/menu[6]", view: "status" }), /write gate: .*\(Ctrl\+S\)/, "menu Program > Save");
   const n = Number(/lines=(\d+)/.exec(c.text)![1]);
   const ins = await tool("sap_set_text", { id: ed, insertBefore: n + 1, text: "WRITE zz_no_such_variable_4711.", view: "status" });
   ok(ins, "insert line");
