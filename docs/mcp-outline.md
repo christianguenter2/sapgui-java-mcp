@@ -264,3 +264,19 @@ rejected), registers the file for cleanup at session end, returns the path; `for
 `/screenshot` copies the PNG to `~/.sapgui-java-mcp/screenshots/` (700/600, newest 20 kept) and returns
 path and size; `sap_screenshot` returns it as MCP image content. Verified for a main window
 (1667×1362) and a pop-up `wnd[1]` (944×858). Read-only – not gated, works in `readOnly` mode.
+
+## 15. Several SAP GUI processes – 2026-11-05
+
+Every logon started from the command line (a logon script calling `guilogon`/`guistart`) runs in its
+own SAP GUI JVM – `bin/gmux/sapgui` is only another launcher, not a multiplexer. With the bridge agent
+in each JVM there is one bridge per process, and the single `bridge.json` let the newest one shadow
+the others.
+- Bridge 0.9.0 registers in `bridges/<pid>.json` (700/600), removes it on `/stop`, reports its pid.
+- MCP `bridge.ts`: `listBridges()` (alive check via `kill(pid, 0)`, stale files deleted, `bridge.json`
+  as fallback for old bridges); session references `<pid>/con[0]/ses[1]` (plain `con[0]/ses[1]` only
+  while one bridge runs); `call()` routes by reference, `statusAll()` / `allSessions()` aggregate.
+- `session.ts`: one agent session per `SID/client`, opened next to a user session of that system (so in
+  its JVM); system = parameter, else the only one, else `defaultSystem`, else last used.
+- Verified: the development system in one process, A4H 2025 in a second one started by the user's logon script with
+  `PLATIN_JAVA` → both bridges in `sap_status`, agent sessions opened in the right JVMs, switching
+  with `system`.

@@ -2,7 +2,7 @@
 // The Java GUI's GuiSessionInfo has getDateFormat()/getDecimalFormat(), but they stay empty, so the
 // values are read from SU3 – in a separate session (/oSU3) that is closed again (/i); the user's
 // session is not touched. Read-only: nothing is saved (and the write gate would refuse it).
-import { call, BridgeError } from "./bridge.js";
+import { call, BridgeError, allSessions, SessionRow } from "./bridge.js";
 
 // USR01-DATFM / -DCPFM / -TIMEFM keys
 const DATE: Record<string, string> = {
@@ -22,29 +22,26 @@ export interface UserFormats {
 const cache = new Map<string, UserFormats>();
 export const cachedFormats = (key: string) => cache.get(key);
 
-type Ses = { id: string; system: string; client: string; user: string; transaction: string };
-async function sessions(): Promise<Ses[]> {
-  const s = await call("status");
-  return s.connections.flatMap((c: any) => c.sessions.filter((x: any) => !x.error));
-}
-const rel = (id: string) => id.replace(/^\/app\//, "");
-
-export async function userFormats(session?: string, refresh = false): Promise<UserFormats> {
-  const all = await sessions();
-  const base = all.find(x => rel(x.id) === (session ?? "con[0]/ses[0]")) ?? all[0];
-  if (!base) throw new BridgeError("no SAP GUI session");
+/** Formats of the user of a session (ref) or of a system ("SID/client"); default: the first session. */
+export async function userFormats(session?: string, refresh = false, system?: string): Promise<UserFormats> {
+  const all = await allSessions();
+  const sys = system?.toUpperCase();
+  const base = session ? all.find(x => x.ref === session || x.ref.endsWith("/" + session) || x.id.replace(/^\/app\//, "") === session)
+    : sys ? all.find(x => `${x.system}/${x.client}`.toUpperCase() === sys && !x.agent) ?? all.find(x => `${x.system}/${x.client}`.toUpperCase() === sys)
+    : all[0];
+  if (!base) throw new BridgeError(session ? `session ${session} not found` : sys ? `system ${sys} is not logged on` : "no SAP GUI session");
   const key = `${base.system}/${base.client}/${base.user}`;
   if (!refresh && cache.has(key)) return cache.get(key)!;
 
-  const before = new Set(all.map(x => x.id));
-  await call("command", { session: rel(base.id), command: "/oSU3", returnScreen: false });
-  let su3: Ses | undefined;
+  const before = new Set(all.map(x => x.ref));
+  await call("command", { session: base.ref, command: "/oSU3", returnScreen: false });
+  let su3: SessionRow | undefined;
   for (let i = 0; i < 25 && !su3; i++) {
     await new Promise(r => setTimeout(r, 200));
-    su3 = (await sessions()).find(x => !before.has(x.id) && x.transaction === "SU3");
+    su3 = (await allSessions()).find(x => !before.has(x.ref) && x.pid === base.pid && x.transaction === "SU3");
   }
   if (!su3) throw new BridgeError("could not open SU3 in a new session (/oSU3) – session limit reached?");
-  const sid = rel(su3.id);
+  const sid = su3.ref;
   try {
     const scr = await call("screen", { session: sid, maxNodes: 600 });
     const tab = scr.elements.find((e: any) => /\/tabpDEFA$/.test(e.id));

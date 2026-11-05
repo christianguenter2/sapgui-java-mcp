@@ -57,7 +57,7 @@ export function formatScreen(s: Screen): string {
   const ses = s.session;
   const lines: string[] = [];
   const active = s.windows.find(w => w.id === s.activeWindow);
-  lines.push(`${ses.system}/${ses.client} ${ses.user} ${ses.id.replace(/^\/app\/con\[\d+\]\//, "")} | ${ses.transaction} ${ses.program}/${ses.screen} | active ${s.activeWindow}: ${q(active?.title)}`);
+  lines.push(`${ses.system}/${ses.client} ${ses.user} ${(ses as any).ref ?? ses.id.replace(/^\/app\/con\[\d+\]\//, "")} | ${ses.transaction} ${ses.program}/${ses.screen} | active ${s.activeWindow}: ${q(active?.title)}`);
   if (s.windows.length > 1) lines.push("windows: " + s.windows.map(w => `${w.id} ${w.type.replace(/^Gui/, "")} ${q(w.title)}`).join("; "));
   const sb = s.statusBar;
   lines.push(sb && sb.text ? `status: [${sb.type || "-"}] ${sb.text}${sb.id ? ` (${sb.id}/${sb.number})` : ""}` : "status: (empty)");

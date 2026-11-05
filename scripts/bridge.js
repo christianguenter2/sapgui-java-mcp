@@ -39,7 +39,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.8.0";
+  var BRIDGE_VERSION = "0.9.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -64,7 +64,11 @@
   if (SELF === null && System.getProperty("sapgui-java-mcp.script") !== null) SELF = String(System.getProperty("sapgui-java-mcp.script"));
   var home = System.getProperty("user.home");
   var dir = Paths.get(home, ".sapgui-java-mcp");
-  var infoFile = dir.resolve("bridge.json");
+  var infoFile = dir.resolve("bridge.json");          // the most recently started bridge (sgb)
+  var MY_PID = Number(Java.type("java.lang.ProcessHandle").current().pid());
+  // every running bridge registers here – one per SAP GUI JVM; the MCP server talks to all of them
+  var regDir = dir.resolve("bridges");
+  var regFile = regDir.resolve(MY_PID + ".json");
   var logFile = dir.resolve("bridge.log");
   var cfgFile = dir.resolve("config.json");
 
@@ -564,7 +568,7 @@
   function opStatus() {
     var app = getApp();
     var res = {
-      bridge: BRIDGE_VERSION,
+      bridge: BRIDGE_VERSION, pid: MY_PID,
       gui: app.getMajorVersion() + "." + app.getMinorVersion() + " rev " + app.getRevision() + " pl " + app.getPatchLevel(),
       connections: []
     };
@@ -1168,7 +1172,10 @@
           respond(ex, 200, res);
           rec.status = 200;
           System.getProperties().remove(KEY);
-          try { Files.deleteIfExists(infoFile); } catch (e) { }
+          try { Files.deleteIfExists(regFile); } catch (e) { }
+          try {   // bridge.json only if it still points to this bridge
+            if (Files.exists(infoFile) && JSON.parse(readText(infoFile)).pid === MY_PID) Files.deleteIfExists(infoFile);
+          } catch (e) { }
           new (Java.type("java.lang.Thread"))(function () { server.stop(0); }).start();
           return;
         } else {
@@ -1219,12 +1226,16 @@
   var port = server.getAddress().getPort();
   Files.createDirectories(dir);
   try { Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------")); } catch (e) { }
-  writeText(infoFile, JSON.stringify({
-    port: port, token: tok, version: BRIDGE_VERSION, script: SELF,
-    pid: Number(Java.type("java.lang.ProcessHandle").current().pid()),
+  var info = JSON.stringify({
+    port: port, token: tok, version: BRIDGE_VERSION, script: SELF, pid: MY_PID,
     started: new Date().toISOString()
-  }, null, 2) + "\n");
+  }, null, 2) + "\n";
+  writeText(infoFile, info);
   chmod600(infoFile);
+  Files.createDirectories(regDir);
+  try { Files.setPosixFilePermissions(regDir, PosixFilePermissions.fromString("rwx------")); } catch (e) { }
+  writeText(regFile, info);
+  chmod600(regFile);
   var reloaded = System.getProperty(KEY_RELOADING) !== null;
   var autostart = System.getProperty("sapgui-java-mcp.autostart") !== null;
   if (autostart) System.clearProperty("sapgui-java-mcp.autostart");

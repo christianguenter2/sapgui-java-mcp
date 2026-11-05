@@ -32,7 +32,7 @@ const baseName = (id: string) => lastPart(id).replace(PREFIX, "").replace(/\[\d+
 function header(s: Screen): string[] {
   const ses = s.session;
   const active = s.windows.find(w => w.id === s.activeWindow);
-  const lines = [`${ses.system}/${ses.client} ${ses.user} ${ses.id.replace(/^\/app\/con\[\d+\]\//, "")} | ${ses.transaction} ${ses.program}/${ses.screen} | active ${s.activeWindow}: ${q(active?.title)}`];
+  const lines = [`${ses.system}/${ses.client} ${ses.user} ${(ses as any).ref ?? ses.id.replace(/^\/app\/con\[\d+\]\//, "")} | ${ses.transaction} ${ses.program}/${ses.screen} | active ${s.activeWindow}: ${q(active?.title)}`];
   if (s.windows.length > 1) lines.push("windows: " + s.windows.map(w => `${w.id} ${w.type.replace(/^Gui/, "")} ${q(w.title)}`).join("; "));
   const sb = s.statusBar;
   lines.push(sb && sb.text ? `status: [${sb.type || "-"}] ${sb.text}${sb.id ? ` (${sb.id}/${sb.number})` : ""}` : "status: (empty)");
@@ -129,7 +129,7 @@ const sameDynpro = (a: Screen, b: Screen) =>
 const last = new Map<string, Screen>();
 
 export function renderScreen(s: Screen, view: View = "compact"): string {
-  const key = s.session.id;
+  const key = (s.session as any).ref ?? s.session.id;   // unique across SAP GUI processes
   const prev = last.get(key);
   last.set(key, s);
 

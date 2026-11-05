@@ -4,11 +4,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { call, readConfig, readInfo, BridgeError } from "./bridge.js";
+import { call, callBridge, readConfig, listBridges, statusAll, BridgeError } from "./bridge.js";
 import { formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
 import { userFormats, cachedFormats } from "./formats.js";
-import { agentSession, openAgentSession, closeAgentSession, ensureAgentSession } from "./session.js";
+import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
 
 const server = new McpServer(
   { name: "sapgui-java", version: "0.1.0" },
@@ -31,6 +31,9 @@ const server = new McpServer(
   },
 );
 
+const system = z.string().optional().describe(
+  "System as SID/client, e.g. A4H/001 – picks the agent session of that system (the right SAP GUI when several run). " +
+  "Default: the only system logged on, else config defaultSystem, else the system used last.");
 const session = z.string().optional().describe(
   "Session path, e.g. con[0]/ses[1]. Default: the agent's own session (opened automatically). " +
   "Pass the user's session (e.g. con[0]/ses[0]) only when the user explicitly asks you to work in it.");
@@ -99,18 +102,26 @@ const VKEYS: Record<string, number> = {
 // ----------------------------------------------------------------- tools
 server.registerTool("sap_status", {
   title: "SAP GUI status",
-  description: "Bridge state, SAP GUI version, open connections and sessions (system, client, user, transaction, screen).",
+  description: "All SAP GUI processes with a bridge, their connections and sessions (system, client, user, transaction, screen). " +
+    "Session references in the output (e.g. 196634/con[0]/ses[3] when several SAP GUI processes run) are what `session` takes.",
   inputSchema: {},
   annotations: { readOnlyHint: true },
 }, async () => run(async () => {
-  const s = await call("status");
-  const lines = [`bridge ${s.bridge}, SAP GUI ${s.gui}`];
-  for (const c of s.connections) {
-    lines.push(`${c.id} ${JSON.stringify(c.description)} ${c.connectionString}${c.disabledByServer ? " – SCRIPTING DISABLED BY SERVER (reconnect after enabling)" : ""}`);
-    for (const x of c.sessions) lines.push(x.error ? `  session error: ${x.error}` :
-      `  ${x.id.replace(/^\/app\//, "")}: ${x.system}/${x.client} ${x.user} ${x.language} | ${x.transaction} ${x.program}/${x.screen}${x.readOnly ? " (read-only)" : ""}` +
-      (x.agent ? (x.id.replace(/^\/app\//, "") === agentSession() ? "  ← agent session (default)" : "  (agent)") : "  (user)") +
-      ((f) => f ? `\n    input formats: date ${f.date}, numbers ${f.decimal}, time ${f.time}` : "\n    input formats: unknown – call sap_user_formats")(cachedFormats(`${x.system}/${x.client}/${x.user}`)));
+  const all = await statusAll();
+  if (!all.length) throw new BridgeError("no SAP GUI bridge is running – start SAP GUI with the bridge");
+  const agentRefs = new Set(agentSessions().values());
+  const lines: string[] = [];
+  for (const r of all) {
+    if (!r.status) { lines.push(`SAP GUI pid ${r.bridge.pid}: bridge ${r.bridge.version ?? "?"} not answering – ${r.error}`); continue; }
+    const s = r.status;
+    lines.push(`SAP GUI pid ${r.bridge.pid}: bridge ${s.bridge}, SAP GUI ${s.gui}`);
+    for (const c of s.connections) {
+      lines.push(`  ${c.id.replace(/^\/app\//, "")} ${JSON.stringify(c.description)} ${c.connectionString}${c.disabledByServer ? " – SCRIPTING DISABLED BY SERVER (reconnect after enabling)" : ""}`);
+      for (const x of c.sessions) lines.push(x.error ? `    session error: ${x.error}` :
+        `    ${x.ref}: ${x.system}/${x.client} ${x.user} ${x.language} | ${x.transaction} ${x.program}/${x.screen}${x.readOnly ? " (read-only)" : ""}` +
+        (x.agent ? (agentRefs.has(x.ref) ? `  ← agent session for ${x.system}/${x.client}` : "  (agent)") : "  (user)") +
+        ((f) => f ? `\n      input formats: date ${f.date}, numbers ${f.decimal}, time ${f.time}` : "")(cachedFormats(`${x.system}/${x.client}/${x.user}`)));
+    }
   }
   return lines.join("\n");
 }));
@@ -118,12 +129,12 @@ server.registerTool("sap_status", {
 server.registerTool("sap_user_formats", {
   title: "User input formats",
   description: "Date format, decimal notation and time format of the logged-on user (user defaults, SU3). " +
-    "Opens SU3 in a separate session, reads the Defaults tab and closes that session again – the current session is not touched. " +
+    "Opens SU3 in a separate session, system, reads the Defaults tab and closes that session again – the current session is not touched. " +
     "Cached per system/client/user; call it once before typing amounts or dates.",
-  inputSchema: { session, refresh: z.boolean().optional().describe("Read again instead of using the cache") },
+  inputSchema: { session, system, refresh: z.boolean().optional().describe("Read again instead of using the cache") },
   annotations: { readOnlyHint: true },
 }, async (a) => run(async () => {
-  const f = await userFormats(a.session, a.refresh);
+  const f = await userFormats(a.session, a.refresh, a.system);
   return `${f.user}: date ${f.date}, numbers ${f.decimal}, time ${f.time}` +
     `${f.timeZone ? `, time zone ${f.timeZone}` : ""}${f.systemTimeZone ? ` (system ${f.systemTimeZone})` : ""}` +
     `\nraw USR01 keys: DATFM=${JSON.stringify(f.raw.datfm)} DCPFM=${JSON.stringify(f.raw.dcpfm)} TIMEFM=${JSON.stringify(f.raw.timefm)}` +
@@ -136,7 +147,7 @@ server.registerTool("sap_screenshot", {
   description: "PNG of the active window of a session (or the given window, e.g. wnd[1]) via SAP GUI's HardCopy. " +
     "Returns the image itself plus the saved path (~/.sapgui-java-mcp/screenshots/, last 20 kept). " +
     "Use it when the screen model is not enough: layout, column headings, colours, icons, or to show the user what you see.",
-  inputSchema: { window: z.string().optional().describe("e.g. wnd[1]; default the active window"), session },
+  inputSchema: { window: z.string().optional().describe("e.g. wnd[1]; default the active window"), session, system },
   annotations: { readOnlyHint: true },
 }, async (a) => {
   try {
@@ -146,7 +157,7 @@ server.registerTool("sap_screenshot", {
     return {
       content: [
         { type: "image" as const, data, mimeType: "image/png" },
-        { type: "text" as const, text: `${ses.system}/${ses.client} ${String(ses.id).replace(/^\/app\/con\[\d+\]\//, "")} ${ses.transaction} ${ses.program}/${ses.screen} ${r.window} ${JSON.stringify(r.title)} – ${r.width}×${r.height}, ${Math.round(r.bytes / 1024)} KB, saved ${r.path}` },
+        { type: "text" as const, text: `${ses.system}/${ses.client} ${ses.ref ?? ses.id} ${ses.transaction} ${ses.program}/${ses.screen} ${r.window} ${JSON.stringify(r.title)} – ${r.width}×${r.height}, ${Math.round(r.bytes / 1024)} KB, saved ${r.path}` },
       ],
     };
   } catch (e: any) {
@@ -158,24 +169,28 @@ server.registerTool("sap_open_session", {
   title: "Open own session",
   description: "Open a new SAP GUI session for the agent (next to the user's) and make it the default for all tools. " +
     "Normally not needed – the first tool call opens one automatically. Use it to start fresh.",
-  inputSchema: { base: z.string().optional().describe("Session whose connection to use, default con[0]/ses[0]"), view },
+  inputSchema: {
+    system,
+    base: z.string().optional().describe("Session whose connection to use (reference from sap_status); default a user session of the system"),
+    view,
+  },
 }, async (a) => run(async () => {
-  const r = await openAgentSession(a.base);
+  const r = await openAgentSession(a.system, a.base);
   const scr = await call("screen", { session: r.session });
-  return `opened agent session ${r.session} (now the default)\n${renderScreen(scr, a.view ?? "status")}`;
+  return `opened agent session ${r.session} for ${r.system} (now its default)\n${renderScreen(scr, a.view ?? "status")}`;
 }));
 
 server.registerTool("sap_close_session", {
   title: "Close own session",
   description: "Close the agent's own session (or another session the agent opened). User sessions are refused.",
-  inputSchema: { session: z.string().optional().describe("Default: the current agent session") },
-}, async (a) => run(async () => `closed ${await closeAgentSession(a.session)}`));
+  inputSchema: { session: z.string().optional().describe("Default: the agent session of the system"), system },
+}, async (a) => run(async () => `closed ${await closeAgentSession(a.session, a.system)}`));
 
 server.registerTool("sap_screen", {
   title: "Read current screen",
   description: "Current window of a session: title, status bar, and all fields/buttons/tabs/controls with ids, values and flags. Menus are omitted unless includeMenus.",
   inputSchema: {
-    session,
+    session, system,
     includeMenus: z.boolean().optional().describe("Include the menu bar tree (large)."),
     maxNodes: z.number().int().min(20).max(3000).optional().describe("Element limit, default 400."),
     view: z.enum(VIEWS).optional().describe("compact (default: toolbars in one line, labels merged, empty read-only fields omitted), changed, status or full"),
@@ -186,7 +201,7 @@ server.registerTool("sap_screen", {
 server.registerTool("sap_start_transaction", {
   title: "Start transaction",
   description: "Start a transaction in the session (like /n<tcode>). Returns the new screen.",
-  inputSchema: { tcode: z.string().min(1).describe("Transaction code, e.g. SE16N"), session, view },
+  inputSchema: { tcode: z.string().min(1).describe("Transaction code, e.g. SE16N"), session, system, view },
 }, async (a) => run(async () => {
   await checkTcode(a.tcode);
   return withScreen(`started ${a.tcode.toUpperCase()}`, await call("tcode", a), a.view);
@@ -207,28 +222,28 @@ server.registerTool("sap_set_fields", {
       z.enum(Object.keys(VKEYS) as [string, ...string[]]),
       z.object({ press: z.string().describe("Button/tab id to press after setting the fields") }),
     ]).optional().describe("Key or {press: id} to send after the fields (e.g. \"Enter\"). Save/F11 writes data – confirm with the user first."),
-    session, expect, view, confirm,
+    session, system, expect, view, confirm,
   },
 }, async (a) => run(async () => {
   const out: string[] = [];
   const ex = parseExpect(a.expect);
   for (const f of a.fields) {
-    const r = await call("set", { session: a.session, id: f.id, value: f.value ?? "", by: f.by, expect: ex });
+    const r = await call("set", { session: a.session, system: a.system, id: f.id, value: f.value ?? "", by: f.by, expect: ex });
     out.push(`${r.id} (${String(r.type).replace(/^Gui/, "")}) = ${JSON.stringify(r.value)}`);
   }
   if (a.then === undefined) return out.join("\n");
   // the guard still applies: the fields did not change the dynpro, so the same expect holds
   if (typeof a.then === "string") {
     const vkey = VKEYS[a.then];
-    return withScreen(`${out.join("\n")}\nsent ${a.then} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, expect: ex, confirm: a.confirm }), a.view);
+    return withScreen(`${out.join("\n")}\nsent ${a.then} (vkey ${vkey})`, await call("vkey", { session: a.session, system: a.system, vkey, expect: ex, confirm: a.confirm }), a.view);
   }
-  return withScreen(`${out.join("\n")}\npressed ${a.then.press}`, await call("press", { session: a.session, id: a.then.press, expect: ex, confirm: a.confirm }), a.view);
+  return withScreen(`${out.join("\n")}\npressed ${a.then.press}`, await call("press", { session: a.session, system: a.system, id: a.then.press, expect: ex, confirm: a.confirm }), a.view);
 }));
 
 server.registerTool("sap_press", {
   title: "Press button / select tab or menu",
   description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. On a list line (lbl[col,row]) or a field it sets the cursor there and double-clicks (F2), e.g. to pick a line in a classic list. Returns the resulting screen.",
-  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, view, expect, confirm },
+  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, system, view, expect, confirm },
 }, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
 server.registerTool("sap_send_key", {
@@ -238,17 +253,17 @@ server.registerTool("sap_send_key", {
   inputSchema: {
     key: z.union([z.enum(Object.keys(VKEYS) as [string, ...string[]]), z.number().int().min(0).max(99)]),
     window: z.string().optional().describe("e.g. wnd[1] for a pop-up; default active window"),
-    session, view, expect, confirm,
+    session, system, view, expect, confirm,
   },
 }, async (a) => run(async () => {
   const vkey = typeof a.key === "number" ? a.key : VKEYS[a.key];
-  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, vkey, window: a.window, expect: parseExpect(a.expect), confirm: a.confirm }), a.view);
+  return withScreen(`sent ${a.key} (vkey ${vkey})`, await call("vkey", { session: a.session, system: a.system, vkey, window: a.window, expect: parseExpect(a.expect), confirm: a.confirm }), a.view);
 }));
 
 server.registerTool("sap_send_command", {
   title: "Send OK-code",
   description: "Send a command to the OK-code field, e.g. '/nSE16N', '/o', '=BACK'. Returns the resulting screen.",
-  inputSchema: { command: z.string().min(1), session, view, expect, confirm },
+  inputSchema: { command: z.string().min(1), session, system, view, expect, confirm },
 }, async (a) => run(async () => {
   if (/^\/[nNoO]\w/.test(a.command)) await checkTcode(a.command);
   return withScreen(`sent ${a.command}`, await call("command", { ...a, expect: parseExpect(a.expect) }), a.view);
@@ -262,7 +277,7 @@ server.registerTool("sap_read_grid", {
     firstRow: z.number().int().min(0).optional(),
     maxRows: z.number().int().min(1).max(500).optional().describe("Default 50"),
     columns: z.array(z.string()).optional().describe("Technical column names; default all in display order"),
-    session,
+    session, system,
   },
   annotations: { readOnlyHint: true },
 }, async (a) => run(async () => formatGrid(await call<Grid>("grid", a))));
@@ -279,30 +294,36 @@ server.registerTool("sap_read_table", {
     maxRows: z.number().int().min(1).max(500).optional().describe("Default 50"),
     columns: z.array(z.string()).optional().describe("Field names or column titles; default all"),
     skipEmpty: z.boolean().optional().describe("Skip rows whose cells are all empty (default true)"),
-    session,
+    session, system,
   },
   annotations: { readOnlyHint: true },
 }, async (a) => run(async () => formatTable(await call<Table>("table", { ...a, titleMode: "p2m" }))));
 
 server.registerTool("sap_reload_bridge", {
-  title: "Reload bridge",
-  description: "Reload scripts/bridge.js inside SAP GUI (after changing the bridge code) without the Scripting menu. " +
-    "Waits until the new bridge answers. The SAP GUI screen and session are not touched.",
+  title: "Reload bridges",
+  description: "Reload scripts/bridge.js in every SAP GUI process with a bridge (after changing the bridge code) without the " +
+    "Scripting menu. Waits until each new bridge answers. Screens and sessions are not touched.",
   inputSchema: {},
 }, async () => run(async () => {
-  const before = await readInfo();
-  const r = await call("reload");
-  for (let i = 0; i < 50; i++) {
-    await new Promise(res => setTimeout(res, 200));
-    try {
-      const now = await readInfo();
-      if (now.started !== before.started) {
-        const s = await call("status");
-        return `bridge reloaded from ${r.script}: ${before.version} → ${s.bridge}, port ${now.port}`;
+  const before = await listBridges();
+  if (!before.length) throw new BridgeError("no SAP GUI bridge is running");
+  const out: string[] = [];
+  for (const b of before) {
+    let script = "?";
+    try { script = (await callBridge(b, "reload")).script; }
+    catch (e: any) { out.push(`pid ${b.pid}: reload refused – ${e?.message ?? e}`); continue; }
+    let done = false;
+    for (let i = 0; i < 50 && !done; i++) {
+      await new Promise(res => setTimeout(res, 200));
+      const now = (await listBridges()).find(x => x.pid === b.pid);
+      if (now && now.started !== b.started) {
+        try { const s = await callBridge(now, "status"); out.push(`pid ${b.pid}: ${b.version} → ${s.bridge}, port ${now.port} (${script})`); done = true; }
+        catch { /* not up yet */ }
       }
-    } catch { /* bridge.json is being rewritten */ }
+    }
+    if (!done) out.push(`pid ${b.pid}: did not come back within 10 s – check ~/.sapgui-java-mcp/bridge.log (reload-error)`);
   }
-  throw new BridgeError("bridge did not come back within 10 s – check ~/.sapgui-java-mcp/bridge.log (reload-error) or restart it from the Scripting menu");
+  return `bridges reloaded:\n` + out.join("\n");
 }));
 
 server.registerTool("sap_grid_action", {
@@ -318,7 +339,7 @@ server.registerTool("sap_grid_action", {
     row: z.number().int().min(0).optional(), column: z.string().optional(),
     rows: z.string().optional().describe("selectRows: \"0\", \"0,2\", \"3-7\""),
     button: z.string().optional(), menuItem: z.string().optional(),
-    session, view, expect, confirm,
+    session, system, view, expect, confirm,
   },
 }, async (a) => run(async () => withScreen(`grid ${a.action}`, await call("grid_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
@@ -331,7 +352,7 @@ server.registerTool("sap_tree_action", {
     action: z.enum(["select", "expand", "collapse", "doubleClick", "selectItem", "doubleClickItem", "clickLink", "pressButton", "checkbox", "unselectAll"]),
     node: z.string().optional().describe("Node key from sap_read_tree"),
     item: z.string().optional(), checked: z.boolean().optional(),
-    session, view, expect, confirm,
+    session, system, view, expect, confirm,
   },
 }, async (a) => run(async () => withScreen(`tree ${a.action} ${a.node ?? ""}`.trim(), await call("tree_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
@@ -342,7 +363,7 @@ server.registerTool("sap_read_tree", {
   inputSchema: {
     id: z.string().describe("Tree id from sap_screen"),
     maxNodes: z.number().int().min(1).max(2000).optional().describe("Default 300"),
-    session,
+    session, system,
   },
   annotations: { readOnlyHint: true },
 }, async (a) => run(async () => {

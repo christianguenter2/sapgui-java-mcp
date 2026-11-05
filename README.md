@@ -40,7 +40,12 @@ Into an already running GUI (without restart):
 `"bridgeScript": "<repo>/scripts/bridge.js"` in `~/.sapgui-java-mcp/config.json` (Nashorn `__FILE__`
 is null when started from the menu; the auto-start agent passes the path itself).
 
-After changing `bridge.js`: `sap_reload_bridge` (or `scripts/sgb reload`) – no restart, no menu.
+After changing `bridge.js`: `sap_reload_bridge` (reloads every bridge) – no restart, no menu.
+
+**Several SAP GUI processes.** Each logon started from the command line gets its own SAP GUI JVM; every
+JVM started with the wrapper runs its own bridge, registered in `~/.sapgui-java-mcp/bridges/<pid>.json`.
+The MCP server talks to all of them. To start your own logon script with the bridge, export
+`PLATIN_JAVA=<repo>/scripts/sapgui-java-with-bridge` before it calls `guistart` / `guilogon`.
 
 ### 3. MCP server
 
@@ -54,16 +59,19 @@ After each rebuild: `/mcp` → reconnect. Env: `SAPGUI_BRIDGE_DIR` (default `~/.
 
 ## Tools
 
-Every tool takes an optional `session`. **Default: the agent's own session**, opened next to yours on
-the first call (`createSession`) and reopened if it was closed; your sessions stay yours. Passing
-`session` explicitly (e.g. `con[0]/ses[0]`) hands a session over. Action tools return the resulting
+Every tool takes an optional `system` (`SID/client`, e.g. `A4H/001`) and `session`. **Default: the
+agent's own session of that system**, opened next to one of your sessions of the system on the first
+call (`createSession`, so in the right SAP GUI process) and reopened if it was closed; your sessions
+stay yours. Without `system`: the only system logged on, else `defaultSystem` from `config.json`, else
+the system used last. Passing `session` explicitly hands a session over; with several SAP GUI processes
+use the reference from `sap_status` (`<pid>/con[0]/ses[1]`). Action tools return the resulting
 screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sap_set_fields`,
 `sap_press`, `sap_send_key`, `sap_send_command`, `sap_grid_action` and `sap_tree_action` also take
 `expect` (screen guard) and `confirm` (write gate).
 
 | Tool | Purpose |
 |---|---|
-| `sap_status` | bridge version, connections, sessions – marked `(user)` / `← agent session (default)` – and the user's input formats once known |
+| `sap_status` | every SAP GUI process with a bridge, its connections and sessions (references, `(user)` / `← agent session for SID/client`), input formats once known |
 | `sap_screen` | the current screen (`view`, `includeMenus`, `maxNodes` default 400) |
 | `sap_start_transaction` | start a transaction (`tcode`); checked against `deniedTransactions` |
 | `sap_set_fields` | set text/checkbox/radio/combo values (`fields: [{id, value, by?}]`); optional `then` (`"Enter"`, `"Execute"`, … or `{press: id}`) – one call per input step |
@@ -77,9 +85,9 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 | `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll` |
 | `sap_screenshot` | PNG of the active window (or `window`, e.g. `wnd[1]`), returned as an image plus the saved path |
 | `sap_user_formats` | the user's date format, decimal notation, time format (SU3 defaults, read in a separate session that is closed again; cached) |
-| `sap_open_session` | open a new agent session and make it the default (normally automatic) |
+| `sap_open_session` | open a new agent session for a `system` and make it that system's default (normally automatic) |
 | `sap_close_session` | close the agent session (sessions the agent did not open are refused) |
-| `sap_reload_bridge` | reload `bridge.js` inside SAP GUI and wait until the new bridge answers |
+| `sap_reload_bridge` | reload `bridge.js` in every SAP GUI process and wait until each new bridge answers |
 
 ### Screen views (`view`)
 
@@ -141,7 +149,9 @@ Column titles are corrected for reordered line layouts. Outline §7.
   - `bridgeScript` – path of `bridge.js`; only needed for reload when started from the Scripting menu (bridge)
   - `deniedTransactions` – tcodes `sap_start_transaction` refuses, e.g. `["SU01"]` (MCP server)
   - `ownSession` – default `true`: tools without `session` use the agent's own session (MCP server)
-- `bridge.json` – port + token, rewritten on every bridge start, deleted on `/stop`
+  - `defaultSystem` – `SID/client` used when several systems are logged on and no `system` is given (MCP server)
+- `bridges/<pid>.json` – port + token of each running bridge (one per SAP GUI process); stale ones are removed
+- `bridge.json` – the most recently started bridge (for `scripts/sgb`)
 - `bridge.log` – JSONL audit of write actions, reloads and errors
 - `agent.log` – auto-start agent
 - `screenshots/` – PNGs from `sap_screenshot` (last 20 kept). They show whatever is on screen, incl. the status bar with system and host – keep them out of repositories and tickets you share.
