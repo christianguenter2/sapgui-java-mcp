@@ -90,17 +90,17 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 - `changed` – default for actions: only elements new or changed on the same window/program/dynpro.
 - `status` – header, status bar and pop-up only. `full` – everything.
 
-ZPOST item screen: `full` 17.9k chars, `compact` 5.2k (−71 %), `changed` after Enter 1.0k (−94 %).
+Typical savings on a large entry screen: `compact` −70 %, `changed` after Enter −90 % or more compared with `full`.
 
 ### Screen guard (`expect`)
 
-`expect: "SAPLXYZ/200"` (as in the screen header, optionally `"ZPOST SAPLXYZ/200 wnd[1]"`) or
+`expect: "SAPLSE16N/120"` (as in the screen header, optionally `"SE16H SAPLSE16N/120 wnd[1]"`) or
 `{program, screen, window, transaction}`. Checked on the bridge's request thread right before the
 action; if the session is elsewhere → HTTP 409, nothing done:
 
 ```
-screen guard: program SAPLXYZ ≠ SAPLSE16N, screen 202 ≠ 120 – nothing was done.
-Session is on SE16H SAPLSE16N/120 wnd[0] "General Table Display"
+screen guard: program SAPLSE16N ≠ SAPLSMTR_NAVIGATION, screen 120 ≠ 100 – nothing was done.
+Session is on SESSION_MANAGER SAPLSMTR_NAVIGATION/100 wnd[0] "SAP Easy Access"
 ```
 
 While a pop-up (`wnd[1]` …) is active, actions on elements of a window behind it are refused

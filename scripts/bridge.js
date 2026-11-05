@@ -203,7 +203,7 @@
   // Write gate: actions that save/post data. Returns a label ("press btn[11] \"Post\"") or null.
   var SAVE_WORDS = /^\s*(save|post|buchen|sichern|speichern|enregistrer|comptabiliser)\b/i;
   var SAVE_CODES = /^(=|\/)?(BU|SAVE|SICH|SPEI|POST|UPDA|\/11|11)$/i;
-  // buttons that commit immediately (ZCLOSE "Close" closed a posting key without any save step);
+  // buttons that commit immediately (a "Close" button plus Yes committed without any save step);
   // "Cancel" (F12) is navigation and deliberately not in the list
   var COMMIT_WORDS = /^\s*(close|release|reverse|delete|freigeben|l(ö|oe)schen|stornieren|schlie(ss|ß)en|abschlie(ss|ß)en)\b/i;
   // question of a confirmation pop-up that leads to a write when answered with Yes
@@ -253,7 +253,7 @@
       if (/\/tbar\[0\]\/btn\[11\]$/.test(id) || SAVE_WORDS.test(txt) || SAVE_WORDS.test(tip) ||
           COMMIT_WORDS.test(txt) || COMMIT_WORDS.test(tip))
         return "press " + id + " " + JSON.stringify(txt || tip);
-      // Yes in a confirmation pop-up whose question leads to a write ("close the posting key?")
+      // Yes in a confirmation pop-up whose question leads to a write ("Do you want to close …?")
       if (/^wnd\[[1-9]\]\//.test(id) && (YES_BUTTON.test(id) || /^\s*(yes|ja|oui)\s*$/i.test(txt))) {
         var q = popupTexts(ses);
         if (q !== null && COMMIT_QUESTION.test(q.text))
@@ -751,14 +751,14 @@
     var max = body.maxRows ? Math.min(Number(body.maxRows), 500) : 50;
     var skipEmpty = body.skipEmpty !== false;
     // The vertical scrollbar's maximum is the number of DATA lines (verified: SE16H T001 → 82 = DD03L
-    // fields; single-line ZDISPLAY lists → 1). rowCount also counts the empty lines below the data.
+    // fields; single-line lists → 1). rowCount also counts the empty lines below the data.
     var dataRows = sb0 ? Number(tryCall(function () { return sb0.getMaximum(); }, rowCount)) : rowCount;
     if (!(dataRows >= 0) || dataRows > rowCount) dataRows = rowCount;
     var limit = skipEmpty ? dataRows : rowCount;
     var last = Math.min(limit, first + max);
 
     // Column metadata. getColumns() is NOT in getCell() order when a line layout reorders the
-    // columns (seen in ZDISPLAY), so titles are matched by field name: each GuiTableColumn is a
+    // columns, so titles are matched by field name: each GuiTableColumn is a
     // collection of its cells, elementAt(0).getName() is the field.
     var colsW = toList(t.getColumns());
     var titleByName = {}, titleByPos = [];
@@ -779,7 +779,7 @@
       return null;
     }
     // GuiTableColumnWrapper.getTitle() maps the column index twice (p2mColumn inside
-    // getPersonasColumnTitle) → wrong titles when a line layout reorders columns (ZDISPLAY Z03).
+    // getPersonasColumnTitle) → wrong titles when a line layout reorders columns.
     // Read the titles from the underlying GuiTableControl instead (reflection on mScriptObject).
     var ctl = scriptObject(t);
     var ctlErr = null;
@@ -815,7 +815,7 @@
       }
     }
     // pick the title source; all variants except "wrapper" come from the control itself
-    // default "p2m" = getColumnName(p2mColumn(c)), verified against the screen in ZDISPLAY (line layout Z03);
+    // default "p2m" = getColumnName(p2mColumn(c)), verified against the screen with a reordering line layout;
     // "wrapper" (GuiTableColumnWrapper.getTitle) maps the index twice and is wrong for reordered columns
     var mode = str(body.titleMode || "p2m");
     for (c = 0; c < cols.length; c++)

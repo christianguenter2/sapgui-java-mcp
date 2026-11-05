@@ -84,9 +84,9 @@ sees the effect of each step without an extra call.
 |---|---|---|
 | 0 Smoke test | `scripts/sgj-smoke-test.js` | report shows session info, tree, thread result, socket OK |
 | 1 Bridge spike ✅ | bridge.js with `/status`, `/screen`, `/set`, `/press`, `/vkey`, `/tcode`, `/command`, `/grid`, `/tree`; curl-tested | **passed 2026-11-04**: SE16N → T000 → Enter → F8 → ALV grid 6 rows (matches SQL); wrappers stay valid after the start script ends; round trips 0.3–0.6 s |
-| 2 MCP server ✅ | Node TS server (`mcp/`), 11 tools, compact text output, deniedTransactions | built + tested over MCP stdio 2026-11-04; registered in Claude Code (`claude mcp add --scope user sapgui-java …`) and used live (SE16H, ZPOST posting, ZDISPLAY). Open: SM30 run on `/XYZ/CFG_PARAM_V` |
+| 2 MCP server ✅ | Node TS server (`mcp/`), 11 tools, compact text output, deniedTransactions | built + tested over MCP stdio 2026-11-04; registered in Claude Code (`claude mcp add --scope user sapgui-java …`) and used live (SE16H, postings and displays, SM30/view cluster) |
 | 3 Controls 🟡 | ALV grid + tree via `SapGridWrapper`/`SapTreeWrapper` ✅, dynpro table controls `/table` ✅ (§7), HTML viewer text ✅ (§8); textedit open | read an ALV result list ✅ |
-| 3a Agent ergonomics ✅ | pop-up text (§8), self-reload `/reload` (§8), screen views compact/changed/status/full (−71 % / −94 % on ZPOST), screen guard `expect` + screen context in errors | 2026-11-04 |
+| 3a Agent ergonomics ✅ | pop-up text (§8), self-reload `/reload` (§8), screen views compact/changed/status/full (about −70 % / −90 % on a large entry screen), screen guard `expect` + screen context in errors | 2026-11-04 |
 | 4 Comfort | auto-start bridge, reconnect, multi-session, screenshot tool | — |
 
 Estimate: phase 1 ≈ 1 day, phase 2 ≈ 1–2 days, phase 3 open (depends on spike).
@@ -106,18 +106,18 @@ Estimate: phase 1 ≈ 1 day, phase 2 ≈ 1–2 days, phase 3 open (depends on sp
 
 ## 7. Table controls (`/table`, `sap_read_table`) – findings 2026-11-04
 
-Tested on ZDISPLAY (item list 0500, G/L list 0600, overview 0705 ×2) and SE16H selection criteria (T001).
+Tested on several item and overview lists and on the SE16H selection criteria (T001).
 
 - Cells: `getCell(visibleRow, col)`; ids `<table>/<cell>[col,visibleRow]` – the visible row is
   relative to the scroll position. Setting a cell via that id with `/set` works (SE16H `LOW[2,1]`).
-- **Data rows = vertical scrollbar `getMaximum()`** (SE16H T001: 82 = DD03L fields; one-line ZDISPLAY
-  lists: 1). `getRowCount()` also counts the empty lines below the data (123 / 16 / 15 / 5).
+- **Data rows = vertical scrollbar `getMaximum()`** (SE16H T001: 82 = DD03L fields; one-line
+  lists: 1). `getRowCount()` also counts the empty lines below the data (123 for 82 rows).
 - Rows outside the visible page: `getVerticalScrollbar().setPosition(n)` (server round trip), then
   re-`findById` the table. 82 rows with one scroll ≈ 0.45 s.
 - A column may have no cell in some rows (SE16H row MANDT) → column metadata from the first row
   that has a cell.
-- **`GuiTableColumnWrapper.getTitle()` is wrong when a line layout reorders columns** (ZDISPLAY layout
-  Z03): it calls `GuiTableControl.getPersonasColumnTitle(mCol)`, which applies `p2mColumn` again.
+- **`GuiTableColumnWrapper.getTitle()` is wrong when a line layout reorders columns** (a customer
+  line layout): it calls `GuiTableControl.getPersonasColumnTitle(mCol)`, which applies `p2mColumn` again.
   Correct title for presentation column c = `GuiTableControl.getColumnName(p2mColumn(c))`, read via
   the wrapper's `mScriptObject` field. Verified against a screenshot; `titleMode` on `/table`
   (`p2m` default, `wrapper`, `direct`, `m2p`, `wrapperM2p`, `personas`) + `debugTitles` keep the
@@ -125,7 +125,7 @@ Tested on ZDISPLAY (item list 0500, G/L list 0600, overview 0705 ×2) and SE16H 
 
 ## 8. Pop-up text and bridge reload – findings 2026-11-04
 
-**Pop-up text.** SPO1 confirmations (`SAPLSPO1/0500`, e.g. ZPOST "Checking posting key") put
+**Pop-up text.** SPO1 confirmations (`SAPLSPO1/0500`, e.g. "… does not exist. Do you want to create it?") put
 the question into an HTML viewer; the scripting wrapper `SapBrowserWrapper` has no read method.
 Path that works: wrapper `mScriptObject` (= CET `GuiShell`) → `mJavaObject` (= `SapBrowser` bean)
 → `mBrowser` (JxBrowser `Browser`) → `mainFrame().text()` (+ child frames). JxBrowser's
@@ -169,8 +169,8 @@ Save/Post/Buchen/Sichern/Speichern/Enregistrer/Comptabiliser, OK-codes `=BU =SAV
 `expect` → 428. Config `confirmWrites: false` turns it off. Tested on SE16H (all five variants refused,
 Enter unaffected).
 
-**Extension (bridge 0.5.0, 2026-11-05).** ZCLOSE showed that not every write is called Save: "Close"
-plus Yes in an SPO1 pop-up closed the day's posting key at once, without the gate noticing.
+**Extension (bridge 0.5.0, 2026-11-05).** A test showed that not every write is called Save: a "Close"
+button plus Yes in an SPO1 pop-up committed at once, without the gate noticing.
 Now also gated:
 - buttons whose text/tooltip starts with Close/Release/Reverse/Delete/Freigeben/Löschen/Stornieren/
   Schliessen/Abschliessen ("Cancel" = F12 is navigation and stays free);
@@ -179,7 +179,7 @@ Now also gated:
   release/create (+ German). Content-based on purpose: "No" to "Save changes?" (= discard) and
   "Continue" on information pop-ups stay free; information texts ("…created", "…posted") do not match
   because of the word boundaries.
-Tested without committing anything: ZPOST "create the key?" Yes/Enter refused, Cancel free; /XYZ/CFG
+Tested without committing anything: a "create …?" pop-up: Yes/Enter refused, Cancel free; /XYZ/CFG
 Delete refused, "Save changes?" Yes refused, No free (DB: no key, no parameter created).
 Still not covered: function codes behind menu entries and context menus, F-keys other than F11 that a
 program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
@@ -208,7 +208,7 @@ program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
 ## 12. Agent session and bridge auto-start – 2026-11-05
 
 **Own session.** User and agent shared `ses[0]`; the user navigating in it broke the agent's flow
-three times (ZPOST, SE54 ×2 – the screen guard caught each). Now:
+three times (the screen guard caught each). Now:
 - bridge `/session_open` (`GuiSessionWrapper.createSession()`, waits ≤ 5 s for the new id) and
   `/session_close` (`GuiConnectionWrapper.closeSession(id)`) – closing is refused (403) for sessions
   the bridge did not open; their ids live in a JVM system property (survives `/reload`); `/status`

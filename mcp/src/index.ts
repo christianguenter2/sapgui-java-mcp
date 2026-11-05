@@ -25,7 +25,7 @@ const server = new McpServer(
       "SapTreeWrapper – read them with sap_read_grid / sap_read_tree and act on them with sap_grid_action / sap_tree_action; classic table controls (type TableControl) " +
       "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
       "save buttons) or changing anything outside development/customizing tasks; the write gate enforces this: " +
-      "Save/Post only run with confirm=true plus expect. Type amounts and dates in the user's formats (sap_user_formats, once per session). Pass expect (e.g. \"SAPLXYZ/200\", " +
+      "Save/Post only run with confirm=true plus expect. Type amounts and dates in the user's formats (sap_user_formats, once per session). Pass expect (e.g. \"SAPLSE16N/120\", " +
       "copied from the last screen header) on every Save/Post and whenever the user may use the same session – " +
       "the action is then refused if the screen changed. Errors name the screen the session is on.",
   },
@@ -52,7 +52,7 @@ const view = z.enum(VIEWS).optional().describe(
 
 // Screen guard: the action is refused (nothing done) if the session is not on this screen.
 const expect = z.union([
-  z.string().describe('Short form as in the screen header: "SAPLXYZ/200", optionally with transaction and window: "ZPOST SAPLXYZ/200 wnd[0]"'),
+  z.string().describe('Short form as in the screen header: "SAPLSE16N/120", optionally with transaction and window: "SE16H SAPLSE16N/120 wnd[0]"'),
   z.object({
     program: z.string().optional(), screen: z.number().int().optional(),
     window: z.string().optional().describe("e.g. wnd[1]"), transaction: z.string().optional(),
@@ -75,7 +75,7 @@ function parseExpect(x: z.infer<typeof expect>): Expect | undefined {
     else if (tok) r.transaction = tok;
   }
   if (r.program === undefined && r.window === undefined && r.transaction === undefined)
-    throw new BridgeError(`cannot parse expect ${JSON.stringify(x)} – use "PROGRAM/DYNPRO", e.g. "SAPLXYZ/200"`);
+    throw new BridgeError(`cannot parse expect ${JSON.stringify(x)} – use "PROGRAM/DYNPRO", e.g. "SAPLSE16N/120"`);
   return r;
 }
 
@@ -269,12 +269,12 @@ server.registerTool("sap_read_grid", {
 
 server.registerTool("sap_read_table", {
   title: "Read table control",
-  description: "Read rows of a classic dynpro table control (type=TableControl in sap_screen, e.g. item lists in ZPOST/ZDISPLAY, SM30, selection criteria in SE16H). " +
+  description: "Read rows of a classic dynpro table control (type=TableControl in sap_screen, e.g. item lists in entry/display transactions, SM30, selection criteria in SE16H). " +
     "Returns column names/titles and cell values per row. Cells are addressed by VISIBLE row: <table id>/<field>[col,visibleRow] – use those ids with sap_set_fields. " +
     "Default: the currently visible page. Rows outside it are read by scrolling the table (a server round trip); the returned cell ids refer to the final scroll position. " +
     "Empty rows are skipped unless skipEmpty=false.",
   inputSchema: {
-    id: z.string().describe("Table control id from sap_screen, e.g. wnd[0]/usr/tblSAPLXYZCTRL_0500"),
+    id: z.string().describe("Table control id from sap_screen, e.g. wnd[0]/usr/subTAB_SUB:SAPLSE16N:0121/tblSAPLSE16NSELFIELDS_TC"),
     firstRow: z.number().int().min(0).optional().describe("Absolute first row; default = current scroll position"),
     maxRows: z.number().int().min(1).max(500).optional().describe("Default 50"),
     columns: z.array(z.string()).optional().describe("Field names or column titles; default all"),
