@@ -338,3 +338,34 @@ known – the gate before the request cannot know the text. `ALV_VIEW_CODES` (`&
 (`&OPTIMIZE`, `&FILTER`, disabled `&LOCAL&PASTE` …), select from an open menu and open+select in one
 call (`&FILTER` opens the filter pop-up), disabled/unknown refused. SE80 class tree: nested submenus
 three levels deep, `"Check > Syntax"` → `WB_CHECK` ("No syntax errors found"), `WB_DELETE` refused.
+
+## 19. Text editors and the ABAP editor – 2026-11-05
+
+**Controls.** `SapTextEditWrapper` (long texts, notes, SAPoffice document contents – `SO00`) and
+`SapAbapEditorWrapper` (SE38/SE24/SE37 source). Both have `getText()` / `setText()` for the whole
+text, lines separated by `\n`. TextEdit also: `isChangeable()`, `isModified()`, `getFirstVisibleLine()`,
+`getNumberOfUnprotectedParts()`, selection. ABAP editor also: `GetLineCount()`, `Get{First,Last}
+VisibleLine()`, `InsertText`, `DeleteRange`, `SelectRange` … – not used: `/text_set` splices lines
+itself and sets the whole text, which works the same for both.
+
+**Screen summary.** `GuiShell.getText()` of an editor is the whole text, and `/screen` printed it
+for every editor (a full program in every compact view). Editors are now summarized as `lineCount`,
+`changeable`, `modified`; `/text` returns lines by range.
+
+**Read-only.** The ABAP editor wrapper has no getter, and `setText()` **works in display mode** –
+the editor showed the new text, locally only (verified 2026-11-05). The state lives in the bean:
+wrapper → `mScriptObject` (`GuiShell`) → `mJavaObject` (`SapAbapEditor`) → `mFacade`
+(`EditorFacadeI` extends `SAPChangeableI`) → `isChangeable()`; `setCurrentDocReadOnly()` sets it.
+`/text_set` refuses (409) before writing when it is false; after writing it compares the text again.
+
+**Modified.** For the ABAP editor none of `IsModified()`, `isTextModified()`, `scriptIsModified()`
+reacts to a scripted `setText()` – yet the server sees the text: Check reported the inserted line's
+error ("Field NO_SUCH_VARIABLE is unknown", line 11), the status became "active (revised)", and Back
+asked "Program … was changed. Save before exiting editor?". So `modified` is reported only when true.
+TextEdit's `isModified()` is reliable.
+
+**Verified (A4H/001).** SE38 `Z_TMP_DEL`: display mode refused; change mode read, insert, replace a
+range, Check; left with "No" – the source on the server is unchanged (no inactive version). SO00
+document contents (TextEdit): replace all, insert, replace a line, umlauts; left with "Exit send
+screen? Yes" without sending – which ended the agent session (SAP closed it), now reported as such.
+

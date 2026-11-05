@@ -63,6 +63,7 @@ function compactElement(e: Element, label: string | undefined, tipToo: boolean):
   else if (e.tooltip && e.type === "GuiButton" && !e.text) parts.push(`(${e.tooltip})`);
   if (e.control) parts.push(`control=${e.control}${e.subtype ? "/" + e.subtype : ""}`);
   if (e.rowCount !== undefined) parts.push(`rows=${e.rowCount}`);
+  if (e.lineCount !== undefined) parts.push(`lines=${e.lineCount}${e.changeable === false ? " ro" : e.changeable ? " editable" : ""}${e.modified ? " modified" : ""} (sap_read_text)`);
   if (e.title) parts.push(`title=${q(e.title)}`);
   if (e.html) parts.push(`html=${q(e.html.length > 200 ? e.html.slice(0, 200) + " …" : e.html)}`);
   if (e.htmlError) parts.push(`htmlErr=${q(e.htmlError)}`);

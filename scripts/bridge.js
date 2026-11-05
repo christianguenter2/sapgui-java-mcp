@@ -26,6 +26,9 @@
 //   /session_open  {session?}             open a new session (createSession) next to the given one; returns its id
 //   /session_close {session}              close a session the bridge opened (user sessions are refused)
 //   /list {session?, window?}             classic list output (lbl[col,row] …) grouped by row
+//   /text {session?, id, firstLine?, maxLines?}   lines of a text editor / ABAP editor control (1-based)
+//   /text_set {session?, id, text, fromLine?, toLine?, insertBefore?}   replace all text, lines
+//             fromLine..toLine, or insert before a line; refused (409) when the editor is read-only
 //   /screenshot {session?, window?}       PNG of the active (or given) window → ~/.sapgui-java-mcp/screenshots/
 //   /reload                               re-load this bridge file (path from __FILE__ or config bridgeScript)
 //   /stop                                 stop the bridge
@@ -42,7 +45,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.11.0";
+  var BRIDGE_VERSION = "0.12.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -298,7 +301,7 @@
   // Modal guard: while a pop-up (wnd[n], n ≥ 1) is active, actions on elements of a window below it
   // are refused – e.g. a grid double-click in wnd[0] behind an open "Sort Order" pop-up stacked a
   // third window on top. Answer or close the pop-up first.
-  var ELEMENT_OPS = { "/set": 1, "/press": 1, "/grid_action": 1, "/tree_action": 1, "/grid": 0, "/table": 0, "/tree": 0 };
+  var ELEMENT_OPS = { "/text_set": 1, "/text": 0, "/set": 1, "/press": 1, "/grid_action": 1, "/tree_action": 1, "/grid": 0, "/table": 0, "/tree": 0 };
   function checkModal(ses, path, body) {
     if (!ELEMENT_OPS[path] || !body.id) return;
     var act = tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
@@ -440,6 +443,14 @@
         var hr = htmlText(n);
         if (hr.error) d.htmlError = hr.error;
         else if (hr.text) d.html = hr.text.length > 1500 ? hr.text.substring(0, 1500) + " …" : hr.text;
+      }
+      if (EDITORS[d.control]) {                       // never the whole source in a screen summary
+        var et = str(tryCall(function () { return n.getText(); }, ""));
+        delete d.text;
+        d.lineCount = splitLines(et).length;
+        if (editorModified(n)) d.modified = true;
+        var ch = editorChangeable(n);
+        if (ch !== null) d.changeable = ch;
       }
       if (d.control === "SapGridWrapper") {
         d.rowCount = tryCall(function () { return Number(n.getRowCount()); }, undefined);
@@ -1191,6 +1202,103 @@
     return ctxResult(ses, body, { ok: true, id: relId(t.getId()), action: a, node: node }, ctx);
   }
 
+  // ---- text editors: SapTextEditWrapper (long texts, notes) and SapAbapEditorWrapper (ABAP source)
+  // Both have getText()/setText() for the whole text ("\n" between lines). Lines are 1-based here,
+  // like the editors' line numbers.
+  var EDITORS = { SapTextEditWrapper: "text", SapAbapEditorWrapper: "abap" };
+  function splitLines(t) { return str(t).split(/\r?\n/); }
+  function editorBean(n) {
+    var so = scriptObject(n);                                   // GuiShell → mJavaObject = the editor bean
+    return so === null ? null : (privateField(so, "mJavaObject") || so);
+  }
+  function editorModified(n, debug) {
+    var b = editorBean(n);
+    var v = {
+      wrapper: tryCall(function () { return !!n.isModified(); }, tryCall(function () { return !!n.IsModified(); }, null)),
+      text: b === null ? null : tryCall(function () { return !!b.isTextModified(); }, null),
+      script: b === null ? null : tryCall(function () { return !!b.scriptIsModified(); }, null)
+    };
+    if (debug) return v;
+    // true only: none of the flags reacts to a scripted setText() (ABAP editor, 2026-11-05), so
+    // "false" would claim an unchanged editor that is not – callers set the field only when true
+    return v.wrapper === true || v.text === true || v.script === true;
+  }
+  // read-only? TextEdit: isChangeable(). ABAP editor: the wrapper has no getter and setText() works
+  // in display mode too (only locally – found 2026-11-05); its SapAbapEditor's facade (mFacade,
+  // SAPChangeableI) knows – setCurrentDocReadOnly() sets it. null = unknown.
+  function editorChangeable(n) {
+    if (str(n.getClass().getSimpleName()) === "SapTextEditWrapper") return !!tryCall(function () { return n.isChangeable(); }, false);
+    var bean = editorBean(n);
+    var fac = bean === null ? null : privateField(bean, "mFacade");
+    var c = fac === null ? null : tryCall(function () { return fac.isChangeable(); }, null);
+    return c === null ? null : !!c;
+  }
+  function editorEl(ses, body) {
+    var e = findEl(ses, body.id);
+    var c = str(e.getClass().getSimpleName());
+    if (!EDITORS[c]) fail(400, "not a text editor: " + relId(e.getId()) + " (control " + c + ")");
+    return e;
+  }
+
+  // /text {id, firstLine?, maxLines?}
+  function opText(ses, body) {
+    var e = editorEl(ses, body);
+    var kind = EDITORS[str(e.getClass().getSimpleName())];
+    var lines = splitLines(e.getText());
+    var first = Math.max(1, Number(body.firstLine || 1)), max = Math.max(1, Number(body.maxLines || 500));
+    var res = {
+      id: relId(e.getId()), editor: kind, lineCount: lines.length, firstLine: first,
+      lines: lines.slice(first - 1, first - 1 + max)
+    };
+    if (editorModified(e)) res.modified = true;
+    if (body.debug) res.modifiedDebug = editorModified(e, true);
+    var ch = editorChangeable(e);
+    if (ch !== null) res.changeable = ch;
+    if (kind === "text") {
+      var parts = Number(tryCall(function () { return e.getNumberOfUnprotectedParts(); }, 0));
+      if (parts > 0) res.unprotectedParts = parts;
+      res.firstVisibleLine = Number(tryCall(function () { return e.getFirstVisibleLine(); }, 0));
+    } else {
+      res.firstVisibleLine = Number(tryCall(function () { return e.GetFirstVisibleLine(); }, 0));
+      res.lastVisibleLine = Number(tryCall(function () { return e.GetLastVisibleLine(); }, 0));
+    }
+    return res;
+  }
+
+  // /text_set {id, text, fromLine?, toLine?, insertBefore?}
+  //   no line arguments: replace the whole text; fromLine (+ toLine, default fromLine): replace those
+  //   lines; insertBefore: insert before that line (lineCount + 1 = append). Writes into the editor
+  //   only – saving is a separate (gated) step.
+  function opTextSet(ses, body) {
+    var e = editorEl(ses, body);
+    if (body.text === undefined || body.text === null) fail(400, "text_set needs text");
+    var kind = EDITORS[str(e.getClass().getSimpleName())];
+    if (editorChangeable(e) === false)
+      fail(409, "editor " + relId(e.getId()) + " is read-only (display mode) – switch to change mode first. Nothing was done.");
+    var old = str(e.getText()), lines = splitLines(old), n = lines.length;
+    var ins = splitLines(body.text), from, to;
+    if (body.insertBefore !== undefined) {
+      from = Number(body.insertBefore);
+      if (!(from >= 1 && from <= n + 1)) fail(400, "insertBefore must be 1.." + (n + 1) + " (the text has " + n + " lines)");
+      to = from - 1;
+    } else if (body.fromLine !== undefined) {
+      from = Number(body.fromLine); to = body.toLine === undefined ? from : Number(body.toLine);
+      if (!(from >= 1 && from <= n && to >= from && to <= n)) fail(400, "fromLine/toLine must lie in 1.." + n + " with fromLine ≤ toLine");
+    } else { from = 1; to = n; }
+    var neu = lines.slice(0, from - 1).concat(ins, lines.slice(to)).join("\n");
+    e.setText(neu);
+    var now = str(findEl(ses, body.id).getText());
+    if (now === old && neu !== old)
+      fail(409, "editor " + relId(e.getId()) + " did not take the text – it is read-only (display mode?). Switch to change mode first.");
+    if (now.replace(/\r\n/g, "\n") !== neu)
+      fail(500, "editor " + relId(e.getId()) + " holds a different text than was set (" + splitLines(now).length + " lines instead of " +
+        splitLines(neu).length + ") – read it with /text and check");
+    return after(ses, body, {
+      ok: true, id: relId(e.getId()), editor: kind, lineCount: splitLines(now).length,
+      replaced: { fromLine: from, toLine: to, removed: to - from + 1, inserted: ins.length }
+    });
+  }
+
   // Trees: type 0 = simple, 1 = list tree, 2 = column tree. In list and column trees the visible
   // texts live in items (getItemText(key, column)); getNodeTextByKey() is often empty there
   // (SE03 tool tree: only the report names came back as keys).
@@ -1343,7 +1451,7 @@
   var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
   server.setExecutor(Executors.newSingleThreadExecutor());
 
-  var WRITE_OPS = { "/set": 1, "/press": 1, "/vkey": 1, "/tcode": 1, "/command": 1, "/session_open": 1, "/session_close": 1, "/grid_action": 1, "/tree_action": 1 };
+  var WRITE_OPS = { "/text_set": 1, "/set": 1, "/press": 1, "/vkey": 1, "/tcode": 1, "/command": 1, "/session_open": 1, "/session_close": 1, "/grid_action": 1, "/tree_action": 1 };
 
   function respond(ex, code, obj) {
     var bytes = new JString(JSON.stringify(obj)).getBytes("UTF-8");
@@ -1425,6 +1533,8 @@
             case "/grid_action": res = opGridAction(ses, body); break;
             case "/screenshot": res = opScreenshot(ses, body); break;
             case "/list": res = opList(ses, body); break;
+            case "/text": res = opText(ses, body); break;
+            case "/text_set": res = opTextSet(ses, body); break;
             case "/tree_action": res = opTreeAction(ses, body); break;
             case "/session_close": res = opSessionClose(body); break;
             default: fail(404, "unknown endpoint " + path);
@@ -1435,6 +1545,12 @@
       } catch (e) {
         var code = (e instanceof BridgeError) ? e.status : 500;
         var msg = (e instanceof BridgeError) ? e.message : errText(e);
+        // the action ended the session (e.g. "Exit" from a transaction that runs alone in it)
+        if (/GuiSessionWrapper is no longer valid/.test(msg)) {
+          msg = "the session was closed by this action (the action itself went through; SAP ended the session) – " +
+            "the next call opens a new agent session; check sap_status";
+          ses = null;
+        }
         // context for the caller: where the session is now (guard errors already say it)
         if (typeof ses !== "undefined" && ses !== null && code !== 409 && code !== 401 && code !== 403 && msg.indexOf("Session is on") < 0)
           msg += " | session is on " + whereText(ses);

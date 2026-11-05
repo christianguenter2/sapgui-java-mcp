@@ -4,6 +4,7 @@ export interface Element {
   id: string; type: string; text?: string; tooltip?: string; changeable?: boolean;
   selected?: boolean; key?: string; required?: boolean; control?: string; subtype?: string;
   rowCount?: number; title?: string; html?: string; htmlError?: string;
+  lineCount?: number; modified?: boolean;
 }
 export interface Popup { title: string; texts: string[]; buttons: { id: string; text: string }[] }
 export interface Screen {
@@ -47,6 +48,7 @@ export function formatElement(e: Element): string {
   if (e.required) parts.push("required");
   if (e.control) parts.push(`control=${e.control}${e.subtype ? "/" + e.subtype : ""}`);
   if (e.rowCount !== undefined) parts.push(`rows=${e.rowCount}`);
+  if (e.lineCount !== undefined) parts.push(`lines=${e.lineCount}${e.changeable === false ? " ro" : e.changeable ? " editable" : ""}${e.modified ? " modified" : ""} (sap_read_text)`);
   if (e.title) parts.push(`title=${q(e.title)}`);
   if (e.html) parts.push(`html=${q(e.html.length > 300 ? e.html.slice(0, 300) + " …" : e.html)}`);
   if (e.htmlError) parts.push(`htmlErr=${q(e.htmlError)}`);
@@ -191,4 +193,22 @@ export function formatCtxMenu(r: CtxMenuResult): string {
     lines.push(e.submenu ? `${pad}${e.text} >${tail}` : `${pad}${e.code}\t${e.text}${tail}`);
   }
   return lines.join("\n");
+}
+
+// ---- text editors (SapTextEditWrapper, SapAbapEditorWrapper)
+export interface TextResult {
+  id: string; editor: "text" | "abap"; lineCount: number; firstLine: number; lines: string[];
+  modified?: boolean; changeable?: boolean; unprotectedParts?: number;
+}
+
+// header + numbered lines ("  12| text"), so line numbers can be passed straight to sap_set_text
+export function formatText(t: TextResult): string {
+  const last = t.firstLine + t.lines.length - 1;
+  const state = [t.changeable === false ? "read-only" : t.changeable ? "editable" : "", t.modified ? "modified" : ""].filter(Boolean).join(", ");
+  const head = `${t.editor === "abap" ? "ABAP editor" : "text editor"} ${t.id}: lines ${t.lines.length ? `${t.firstLine}..${last}` : "none"} of ${t.lineCount}` +
+    (state ? ` (${state})` : "") + (t.unprotectedParts ? `, ${t.unprotectedParts} unprotected parts` : "");
+  const w = String(Math.max(last, 1)).length;
+  const out = [head, ...t.lines.map((l, i) => `${String(t.firstLine + i).padStart(w)}| ${l}`)];
+  if (last < t.lineCount) out.push(`… more lines: call again with firstLine=${last + 1}`);
+  return out.join("\n");
 }

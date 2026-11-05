@@ -10,7 +10,7 @@ The agent works in **its own SAP GUI session** next to yours, every Save/Post ne
 confirmation, and screens come back in a compact, token-saving form. Design notes and everything
 learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
-> **Status: experimental (0.11.0).** Use it on **development, test and trial systems only** – never on
+> **Status: experimental (0.12.0).** Use it on **development, test and trial systems only** – never on
 > production. An AI agent drives a logged-on SAP GUI with your user's authorizations. The write gate
 > (`confirm`) is a **heuristic** based on button texts, OK-codes and pop-up questions in English and
 > German; it does not catch every write (function codes a program maps to saving, for example), and it is no substitute for
@@ -115,6 +115,8 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`) plus toolbar ids, selected rows, current cell; waits for lazily loaded rows and warns about rows that stayed empty |
 | `sap_grid_action` | ALV grid: `setCurrentCell`, `click`, `doubleClick`, `pressButton` (row + technical column), `selectRows` (`"0,2-4"`), `selectAll`, `clearSelection`, `pressColumnHeader`, `pressToolbar` (button id), `pressToolbarContext` / `selectToolbarMenuItem`; context menu: `contextMenu` (row + column or current cell), `selectContextMenuItem` (`menuItem` = code or `menuText`), `closeContextMenu` |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true); cell ids usable with `sap_set_fields` |
+| `sap_read_text` | text editor (long texts, notes) or ABAP editor (SE38/SE24/SE37 source): numbered lines (1-based) by range, read-only/modified state; the screen shows these controls only as `lines=N` |
+| `sap_set_text` | change a text or ABAP editor: whole text, lines `fromLine`..`toLine`, or `insertBefore` a line; refused in display mode; saving stays a separate, gated step |
 | `sap_read_list` | classic list output (WRITE lists, SE16 results, report output: `lbl[col,line]` …) as a table – one column per cell start position, title lines as text, PageDown hint; ~95 % smaller than `view=full` |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns |
 | `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll`; context menu: `nodeContextMenu`, `itemContextMenu`, `headerContextMenu`, `defaultContextMenu`, `selectContextMenuItem`, `closeContextMenu` |
@@ -247,8 +249,8 @@ that talks to SAP GUI is tested manually against real systems.
 
 ## Status
 
-Experimental, in use against development and trial systems since 2026-11-04. Open: text edit / ABAP editor controls, tests against a live SAP GUI. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§18.
+Experimental, in use against development and trial systems since 2026-11-04. Open: tests against a live SAP GUI. History and findings:
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§19.
 
 ## License
 

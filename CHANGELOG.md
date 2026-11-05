@@ -3,6 +3,19 @@
 All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP server
 (`mcp/package.json`) and this file in lockstep; CI checks that they match.
 
+## [0.12.0] – 2026-11-05
+
+### Added
+- `sap_read_text` / `sap_set_text` for text editors (`SapTextEditWrapper`) and the ABAP editor
+  (`SapAbapEditorWrapper`): numbered lines by range; replace the whole text, a line range, or insert
+  before a line. Refused when the editor is read-only (display mode) – the ABAP editor would
+  otherwise take the text locally. Saving stays a separate, gated step.
+
+### Changed
+- Screen summaries show editors as `lines=N` (+ ro / editable / modified) instead of the whole text.
+- An action that ends the session (e.g. Exit from a transaction) reports that clearly instead of a
+  Java exception.
+
 ## [0.11.0] – 2026-11-05
 
 ### Added

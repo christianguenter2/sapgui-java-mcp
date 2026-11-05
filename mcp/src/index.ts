@@ -5,14 +5,14 @@ import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { call, callBridge, readConfig, listBridges, statusAll, BridgeError } from "./bridge.js";
-import { formatGrid, formatTable, formatList, formatCtxMenu, Screen, Grid, Table, ListResult, CtxMenuResult } from "./format.js";
+import { formatGrid, formatTable, formatList, formatCtxMenu, formatText, Screen, Grid, Table, ListResult, CtxMenuResult, TextResult } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
 import { parseExpect } from "./expect.js";
 import { userFormats, cachedFormats } from "./formats.js";
 import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
 
 const server = new McpServer(
-  { name: "sapgui-java", version: "0.11.0" },
+  { name: "sapgui-java", version: "0.12.0" },
   {
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
@@ -24,7 +24,7 @@ const server = new McpServer(
       "sap_screen again after an action; use view=full only when an element seems to be missing. Always read the status bar: [E] = error, [W] = warning, " +
       "[S] = success. Pop-ups appear as wnd[1], wnd[2]; their question and answer buttons are shown in a POPUP block – read it before answering, never guess. ALV grids and trees show up as control=SapGridWrapper / " +
       "SapTreeWrapper – read them with sap_read_grid / sap_read_tree and act on them with sap_grid_action / sap_tree_action; classic table controls (type TableControl) " +
-      "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
+      "with sap_read_table; text and ABAP editors (control=SapTextEditWrapper / SapAbapEditorWrapper, shown as lines=N) with sap_read_text / sap_set_text. Ask the user before saving data (Ctrl+S / " +
       "save buttons) or changing anything outside development/customizing tasks; the write gate enforces this: " +
       "Save/Post only run with confirm=true plus expect. Type amounts and dates in the user's formats (sap_user_formats, once per session). Pass expect (e.g. \"SAPLSE16N/120\", " +
       "copied from the last screen header) on every Save/Post and whenever the user may use the same session – " +
@@ -356,6 +356,47 @@ server.registerTool("sap_tree_action", {
     session, system, view, expect, confirm,
   },
 }, async (a) => run(async () => withCtxMenu(`tree ${a.action} ${a.node ?? ""}`.trim(), await call("tree_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
+
+server.registerTool("sap_read_text", {
+  title: "Read text editor",
+  description: "Read the lines of a multi-line text editor (control=SapTextEditWrapper – long texts, notes) or ABAP editor " +
+    "(control=SapAbapEditorWrapper – SE38/SE24/SE37 source) as numbered lines (1-based, the editor's numbering), plus read-only/modified state. " +
+    "The screen shows these controls only as lines=N.",
+  inputSchema: {
+    id: z.string().describe("Editor id from sap_screen, e.g. wnd[0]/usr/cntlEDITOR/shellcont/shell"),
+    firstLine: z.number().int().min(1).optional().describe("Default 1"),
+    maxLines: z.number().int().min(1).max(5000).optional().describe("Default 500"),
+    session, system,
+  },
+  annotations: { readOnlyHint: true },
+}, async (a) => run(async () => formatText(await call<TextResult>("text", a))));
+
+server.registerTool("sap_set_text", {
+  title: "Change text editor",
+  description: "Change the text of a text editor or ABAP editor (see sap_read_text): without line arguments the whole text is replaced; " +
+    "fromLine (+ toLine, default fromLine) replaces those lines; insertBefore inserts before that line (lineCount + 1 appends). " +
+    "Lines are 1-based as in sap_read_text; text may contain several lines (\\n). Only changes the editor – saving/activating is a separate, " +
+    "gated step. Refused when the editor is read-only (display mode): switch to change mode first. Returns the resulting screen.",
+  inputSchema: {
+    id: z.string().describe("Editor id from sap_screen"),
+    text: z.string().describe("New text; lines separated by \\n"),
+    fromLine: z.number().int().min(1).optional(), toLine: z.number().int().min(1).optional(),
+    insertBefore: z.number().int().min(1).optional(),
+    session, system, view, expect,
+  },
+}, async (a) => run(async () => {
+  if (a.insertBefore !== undefined && (a.fromLine !== undefined || a.toLine !== undefined))
+    throw new BridgeError("pass either insertBefore or fromLine/toLine, not both");
+  if (a.toLine !== undefined && a.fromLine === undefined) throw new BridgeError("toLine needs fromLine");
+  const r = await call<{ lineCount: number; replaced: { fromLine: number; toLine: number; removed: number; inserted: number }; screen?: Screen }>(
+    "text_set", { ...a, expect: parseExpect(a.expect) });
+  const x = r.replaced;
+  const n = (k: number) => `${k} line${k === 1 ? "" : "s"}`;
+  const what = a.insertBefore !== undefined ? `inserted ${n(x.inserted)} before line ${x.fromLine}`
+    : a.fromLine !== undefined ? `replaced ${x.fromLine === x.toLine ? `line ${x.fromLine}` : `lines ${x.fromLine}..${x.toLine}`} with ${n(x.inserted)}`
+    : `replaced the whole text (${n(x.removed)}) with ${n(x.inserted)}`;
+  return withScreen(`${what}; editor now has ${r.lineCount} lines – not saved`, r, a.view);
+}));
 
 server.registerTool("sap_read_list", {
   title: "Read classic list",
