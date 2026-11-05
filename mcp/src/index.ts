@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { call, callBridge, readConfig, listBridges, statusAll, BridgeError } from "./bridge.js";
-import { formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
+import { formatGrid, formatTable, formatList, Screen, Grid, Table, ListResult } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
 import { userFormats, cachedFormats } from "./formats.js";
 import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
@@ -355,6 +355,20 @@ server.registerTool("sap_tree_action", {
     session, system, view, expect, confirm,
   },
 }, async (a) => run(async () => withScreen(`tree ${a.action} ${a.node ?? ""}`.trim(), await call("tree_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
+
+server.registerTool("sap_read_list", {
+  title: "Read classic list",
+  description: "Read classic list output (WRITE lists, SE16 results, report output, SE03 tools – elements lbl[col,row], txt[…], chk[…] " +
+    "in wnd[n]/usr) as a table: one line per list line, one column per cell start position. Far more compact than view=full. " +
+    "Lines with a single cell (titles, totals) are printed as text. sap_press on a cell id double-clicks it.",
+  inputSchema: {
+    window: z.string().optional().describe("e.g. wnd[1]; default the active window"),
+    firstLine: z.number().int().min(0).optional().describe("First list line (row index) to show, default 0"),
+    maxLines: z.number().int().min(1).max(1000).optional().describe("Default 200"),
+    session, system,
+  },
+  annotations: { readOnlyHint: true },
+}, async (a) => run(async () => formatList(await call<ListResult>("list", a), a.firstLine ?? 0, a.maxLines ?? 200)));
 
 server.registerTool("sap_read_tree", {
   title: "Read tree",

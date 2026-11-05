@@ -86,7 +86,7 @@ export function parseRef(ref: string): { pid?: number; session: string } {
 // Endpoints that act on a session. Without an explicit "session" they go to the agent's own session
 // of the requested system (see session.ts) – never silently to a session the user is working in.
 const SESSION_ENDPOINTS = new Set(["screen", "set", "press", "vkey", "tcode", "command", "grid", "table", "tree",
-  "grid_action", "tree_action", "screenshot", "session_open", "session_close"]);
+  "grid_action", "tree_action", "screenshot", "list", "session_open", "session_close"]);
 let sessionResolver: ((system?: string) => Promise<string | undefined>) | undefined;
 export function setSessionResolver(fn: (system?: string) => Promise<string | undefined>) { sessionResolver = fn; }
 

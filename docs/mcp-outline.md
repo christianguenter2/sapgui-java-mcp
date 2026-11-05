@@ -289,3 +289,16 @@ open, or `GuiApplication.isUnattended()`. The agent therefore no longer calls `p
 the interpreter's private `mScriptEngine` and calls `eval(text)` – same scope, preset `application`,
 no dialog. (The global unattended flag would also suppress dialogs the user should see.) agent.log
 lines now carry the pid.
+
+## 17. Classic lists (`/list`, `sap_read_list`) – 2026-11-05
+
+List output is a flat set of `lbl[col,row]` / `txt[…]` / `chk[…]` elements. Their ids say
+`wnd[0]/usr/lbl[3,5]`, but in the object tree they are children of the ListContainer `usr/lcnt`,
+which does not appear in the ids – `/list` walks the descendants of `usr`. It returns the non-empty
+cells grouped by line with start column, type and id, plus the usr area's vertical scrollbar (more
+pages → PageDown, vkey 82).
+`sap_read_list` builds the table: columns = start positions used by at least two lines of the page
+(title lines such as "Table: T000" would otherwise add columns) and by at least one table line; a
+line with most cells outside those columns is printed as text. Columns are computed from the whole
+page even when only a slice is shown. SE16 T005 page: `view=full` 114.8k chars (cut at 3,000
+elements), `sap_read_list` 5.0k (−96 %), complete.

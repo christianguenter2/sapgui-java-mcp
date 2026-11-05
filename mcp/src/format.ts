@@ -123,3 +123,52 @@ export function formatGrid(g: Grid): string {
       `the grid may not have loaded them; read them again with firstRow before relying on them`);
   return lines.join("\n");
 }
+
+export interface ListCell { col: number; text: string; type: string; id: string; editable?: boolean }
+export interface ListResult {
+  window: string; title: string; cells: number; rows: { row: number; cells: ListCell[] }[];
+  scrollbar: { position: number; maximum: number; pageSize: number } | null;
+  session: { system: string; client: string; ref?: string; id: string; transaction: string; program: string; screen: number };
+}
+
+/**
+ * Classic list → table. Rows with two or more cells form the table; their cell start columns become the
+ * table columns (list output aligns header and data on the same start column). Rows with a single cell
+ * (titles, separators, totals text) are printed as plain lines in place.
+ */
+export function formatList(l: ListResult, firstRow = 0, maxRows = 200): string {
+  const ses = l.session;
+  const rows = l.rows.filter(r => r.row >= firstRow).slice(0, maxRows);
+  // table columns = cell start positions used by at least two lines (title lines like "Table: T000"
+  // would otherwise add columns of their own); a line mostly outside those columns is printed as text
+  // columns from ALL lines of the page – the shown slice may lack the header or most data lines
+  const multi = l.rows.filter(r => r.cells.length >= 2);
+  const count = new Map<number, number>();
+  for (const r of multi) for (const c of r.cells) count.set(c.col, (count.get(c.col) ?? 0) + 1);
+  const minUse = multi.length >= 3 ? 2 : 1;
+  const main = new Set([...count].filter(([, n]) => n >= minUse).map(([c]) => c));
+  const isTable = (r: { cells: ListCell[] }) => r.cells.length >= 2 && r.cells.filter(c => main.has(c.col)).length >= Math.ceil(r.cells.length * 0.6);
+  const used = new Set(l.rows.filter(isTable).flatMap(r => r.cells.map(c => c.col)));
+  const cols = [...main].filter(c => used.has(c)).sort((a, b) => a - b);
+  const clean = (t: string) => t.trim().replace(/[\t\n]/g, " ");
+  const lines = [
+    `list ${l.window} ${q(l.title)} – ${ses.system}/${ses.client} ${ses.ref ?? ses.id} ${ses.transaction} ${ses.program}/${ses.screen}: ` +
+      `${l.rows.length} lines${rows.length < l.rows.length ? `, showing ${rows.length} from line ${firstRow}` : ""}`,
+    `cell ids: ${l.window}/usr/<lbl|txt|chk>[col,line] – sap_press on a cell double-clicks it (picks the line)`,
+    ["line", ...cols.map(c => `@${c}`)].join("\t"),
+  ];
+  for (const r of rows) {
+    if (!isTable(r)) { lines.push(`${r.row}\t${r.cells.map(c => clean(c.text)).join(" ")}`); continue; }
+    const byCol = new Map(r.cells.map(c => [c.col, c]));
+    lines.push([String(r.row), ...cols.map(c => {
+      const x = byCol.get(c);
+      if (!x) return "";
+      return (x.editable && x.type !== "CheckBox" ? "=" : "") + clean(x.text);
+    })].join("\t"));
+  }
+  const sb = l.scrollbar;
+  if (sb && sb.maximum > sb.position + sb.pageSize)
+    lines.push(`… more lines below (scroll ${sb.position}/${sb.maximum}, page ${sb.pageSize}): sap_send_key PageDown, then read again`);
+  lines.push("columns are the start positions of the cells (@col); '=' marks an editable field");
+  return lines.join("\n");
+}

@@ -81,6 +81,7 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`) plus toolbar ids, selected rows, current cell; waits for lazily loaded rows and warns about rows that stayed empty |
 | `sap_grid_action` | ALV grid: `setCurrentCell`, `click`, `doubleClick`, `pressButton` (row + technical column), `selectRows` (`"0,2-4"`), `selectAll`, `clearSelection`, `pressColumnHeader`, `pressToolbar` (button id), `pressToolbarContext` / `selectToolbarMenuItem` |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true); cell ids usable with `sap_set_fields` |
+| `sap_read_list` | classic list output (WRITE lists, SE16 results, report output: `lbl[col,line]` …) as a table – one column per cell start position, title lines as text, PageDown hint; ~95 % smaller than `view=full` |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns |
 | `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll` |
 | `sap_screenshot` | PNG of the active window (or `window`, e.g. `wnd[1]`), returned as an image plus the saved path |
@@ -184,7 +185,7 @@ SMOKE_QUIET=1 node dist/smoke.js sap_screen '{"view":"compact"}'   # sizes only
 
 Bridge level: `scripts/sgb <endpoint> '<json>'` with endpoints `status`, `screen`, `set`, `press`,
 `vkey`, `tcode`, `command`, `grid`, `grid_action`, `table`, `tree`, `tree_action`, `session_open`,
-`session_close`, `screenshot`, `reload`, `stop`. Action endpoints return the resulting screen unless
+`session_close`, `screenshot`, `list`, `reload`, `stop`. Action endpoints return the resulting screen unless
 `{"returnScreen": false}`; without `session` the bridge uses `con[0]/ses[0]`.
 
 ```

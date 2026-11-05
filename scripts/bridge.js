@@ -23,6 +23,7 @@
 //             (scrolls the table for rows outside the visible page)
 //   /session_open  {session?}             open a new session (createSession) next to the given one; returns its id
 //   /session_close {session}              close a session the bridge opened (user sessions are refused)
+//   /list {session?, window?}             classic list output (lbl[col,row] …) grouped by row
 //   /screenshot {session?, window?}       PNG of the active (or given) window → ~/.sapgui-java-mcp/screenshots/
 //   /reload                               re-load this bridge file (path from __FILE__ or config bridgeScript)
 //   /stop                                 stop the bridge
@@ -39,7 +40,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.9.0";
+  var BRIDGE_VERSION = "0.10.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -484,6 +485,57 @@
       else if (e.type === "GuiButton" && /\/tbar\[0\]\/btn\[\d+\]$/.test(e.id)) buttons.push({ id: e.id, text: str(e.tooltip || e.text).trim() });
     }
     return { title: str(tryCall(function () { return win.getText(); }, "")), texts: texts, buttons: buttons };
+  }
+
+  // ------------------------------------------------------------ classic lists
+  // List output (WRITE lists, SE16, report output, SE03 tools …) is a flat set of GuiLabel /
+  // text field / checkbox elements named lbl[col,row], txt[col,row], chk[col,row] in wnd[n]/usr.
+  // /list returns them grouped by row with column positions; the MCP side builds a table.
+  // The usr area's vertical scrollbar tells whether more pages follow (PageDown = vkey 82).
+  var LIST_CELL = /^(lbl|txt|ctxt|chk|rad|btn|cmb|pwd)\[(\d+),(\d+)\]$/;
+  function opList(ses, body) {
+    var wid = body.window ? str(body.window) : tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+    var usr = findEl(ses, wid + "/usr");
+    // the cells sit under the ListContainer (lcnt), which does not appear in their ids → walk descendants
+    var kids = [];
+    (function collect(node, depth) {
+      if (depth > 4 || kids.length > 20000) return;
+      var ch = toList(tryCall(function () { return node.getChildren(); }, null));
+      for (var c = 0; c < ch.length; c++) {
+        kids.push(ch[c]);
+        var t = str(tryCall(function () { return ch[c].getType(); }, ""));
+        if (/Container|UserArea|SimpleContainer|ListContainer/.test(t)) collect(ch[c], depth + 1);
+      }
+    })(usr, 0);
+    var rows = {}, cells = 0;
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i];
+      var name = str(tryCall(function () { return k.getName(); }, ""));
+      var id = relId(str(tryCall(function () { return k.getId(); }, "")));
+      var m = LIST_CELL.exec(id.substring(id.lastIndexOf("/") + 1));
+      if (!m) continue;
+      var type = str(tryCall(function () { return k.getType(); }, ""));
+      var text;
+      if (type === "GuiCheckBox" || type === "GuiRadioButton") text = tryCall(function () { return k.isSelected(); }, false) ? "[x]" : "[ ]";
+      else text = str(tryCall(function () { return k.getText(); }, ""));
+      if (text.trim() === "") continue;
+      var r = Number(m[3]);
+      if (!rows[r]) rows[r] = [];
+      rows[r].push({ col: Number(m[2]), text: text.replace(/\s+$/, ""), type: type.replace(/^Gui/, ""), id: id,
+        editable: (type === "GuiTextField" || type === "GuiCTextField" || type === "GuiCheckBox") ? !!tryCall(function () { return k.isChangeable(); }, false) : undefined });
+      cells++;
+    }
+    var out = [];
+    for (var rk in rows) { rows[rk].sort(function (a, b) { return a.col - b.col; }); out.push({ row: Number(rk), cells: rows[rk] }); }
+    out.sort(function (a, b) { return a.row - b.row; });
+    var sb = tryCall(function () { return usr.getVerticalScrollbar(); }, null);
+    var scroll = sb === null ? null : {
+      position: Number(tryCall(function () { return sb.getPosition(); }, -1)),
+      maximum: Number(tryCall(function () { return sb.getMaximum(); }, -1)),
+      pageSize: Number(tryCall(function () { return sb.getPageSize(); }, -1))
+    };
+    return { window: wid, title: str(tryCall(function () { return ses.findById(wid).getText(); }, "")),
+      cells: cells, rows: out, scrollbar: scroll, session: sessionInfo(ses) };
   }
 
   // ------------------------------------------------------------ screenshot
@@ -1198,6 +1250,7 @@
             case "/session_open": res = opSessionOpen(body); break;
             case "/grid_action": res = opGridAction(ses, body); break;
             case "/screenshot": res = opScreenshot(ses, body); break;
+            case "/list": res = opList(ses, body); break;
             case "/tree_action": res = opTreeAction(ses, body); break;
             case "/session_close": res = opSessionClose(body); break;
             default: fail(404, "unknown endpoint " + path);
