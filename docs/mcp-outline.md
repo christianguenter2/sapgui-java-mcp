@@ -280,3 +280,12 @@ the others.
 - Verified: the development system in one process, A4H 2025 in a second one started by the user's logon script with
   `PLATIN_JAVA` → both bridges in `sap_status`, agent sessions opened in the right JVMs, switching
   with `system`.
+
+## 16. No "script completed" dialog on auto-start – 2026-11-05
+
+`GuiJavaScriptInterpreter.processScript()` shows "The script has successfully completed its execution"
+(`scr_jsi_execOK`) after every run unless `GuiApplication.isProfiling()`, the script editor window is
+open, or `GuiApplication.isUnattended()`. The agent therefore no longer calls `processScript()`: it reads
+the interpreter's private `mScriptEngine` and calls `eval(text)` – same scope, preset `application`,
+no dialog. (The global unattended flag would also suppress dialogs the user should see.) agent.log
+lines now carry the pid.

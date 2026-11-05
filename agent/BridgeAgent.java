@@ -7,8 +7,9 @@
 // A daemon thread waits until SAP GUI's GuiApplication exists (its classes come from SAP's own class
 // loader, found via Instrumentation.getAllLoadedClasses()), then runs the bridge through the GUI's own
 // script interpreter – GuiJavaScriptEventHandler.createGlobalHandler(app) +
-// new GuiJavaScriptInterpreter(handler, app, null, null).processScript(text) – the same path as the
-// Scripting menu, so the script gets the preset 'application' object.
+// new GuiJavaScriptInterpreter(handler, app, null, null) and evaluates it with that interpreter's script
+// engine – the scope the Scripting menu uses, so the script gets the preset 'application' object, but
+// without the "script has successfully completed" dialog that processScript() shows afterwards.
 // Output goes to ~/.sapgui-java-mcp/agent.log only: guilogon reads stdout of a JVM that also gets this
 // agent ("getopts").
 import java.lang.instrument.Instrumentation;
@@ -66,8 +67,15 @@ public final class BridgeAgent {
     String text = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
     System.setProperty("sapgui-java-mcp.autostart", "X");          // bridge: no start dialog
     System.setProperty("sapgui-java-mcp.script", file.toString()); // bridge: path for /reload
-    Object r = ipCls.getMethod("processScript", String.class).invoke(interp, text);
-    log("bridge started from " + file + (r != null && !String.valueOf(r).isEmpty() ? " – interpreter said: " + r : ""));
+    // Not processScript(): after every run it shows "The script has successfully completed its execution"
+    // (unless profiling, the script editor is open or the GUI runs unattended). Evaluate with the
+    // interpreter's own engine instead – same scope with the preset 'application', no dialog.
+    java.lang.reflect.Field ef = ipCls.getDeclaredField("mScriptEngine");
+    ef.setAccessible(true);
+    javax.script.ScriptEngine engine = (javax.script.ScriptEngine) ef.get(interp);
+    if (engine == null) throw new IllegalStateException("interpreter has no script engine (Nashorn not found on " + l + ")");
+    Object r = engine.eval(text);
+    log("bridge started from " + file + (r != null && !String.valueOf(r).isEmpty() ? " – script returned: " + r : ""));
   }
 
   private static Class<?> findLoaded(Instrumentation inst, String name) {
@@ -78,7 +86,7 @@ public final class BridgeAgent {
   private static void log(String msg) {
     try {
       Files.createDirectories(DIR);
-      Files.write(DIR.resolve("agent.log"), (Instant.now() + " " + msg + "\n").getBytes(StandardCharsets.UTF_8),
+      Files.write(DIR.resolve("agent.log"), (Instant.now() + " pid " + ProcessHandle.current().pid() + " " + msg + "\n").getBytes(StandardCharsets.UTF_8),
           StandardOpenOption.CREATE, StandardOpenOption.APPEND);
     } catch (Exception ignored) { }
   }
