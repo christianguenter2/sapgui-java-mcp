@@ -75,6 +75,7 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true); cell ids usable with `sap_set_fields` |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns |
 | `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll` |
+| `sap_screenshot` | PNG of the active window (or `window`, e.g. `wnd[1]`), returned as an image plus the saved path |
 | `sap_user_formats` | the user's date format, decimal notation, time format (SU3 defaults, read in a separate session that is closed again; cached) |
 | `sap_open_session` | open a new agent session and make it the default (normally automatic) |
 | `sap_close_session` | close the agent session (sessions the agent did not open are refused) |
@@ -143,6 +144,7 @@ Column titles are corrected for reordered line layouts. Outline §7.
 - `bridge.json` – port + token, rewritten on every bridge start, deleted on `/stop`
 - `bridge.log` – JSONL audit of write actions, reloads and errors
 - `agent.log` – auto-start agent
+- `screenshots/` – PNGs from `sap_screenshot` (last 20 kept). They show whatever is on screen, incl. the status bar with system and host – keep them out of repositories and tickets you share.
 
 ```
 {"allowedSystems": ["DEV/100"], "deniedTransactions": ["SU01"]}
@@ -172,7 +174,7 @@ SMOKE_QUIET=1 node dist/smoke.js sap_screen '{"view":"compact"}'   # sizes only
 
 Bridge level: `scripts/sgb <endpoint> '<json>'` with endpoints `status`, `screen`, `set`, `press`,
 `vkey`, `tcode`, `command`, `grid`, `grid_action`, `table`, `tree`, `tree_action`, `session_open`,
-`session_close`, `reload`, `stop`. Action endpoints return the resulting screen unless
+`session_close`, `screenshot`, `reload`, `stop`. Action endpoints return the resulting screen unless
 `{"returnScreen": false}`; without `session` the bridge uses `con[0]/ses[0]`.
 
 ```
@@ -188,6 +190,6 @@ First-time diagnostics: `scripts/sgj-smoke-test.js` from the Scripting menu writ
 
 ## Status
 
-In use against a development system since 2026-11-04. Open: context menus (grid/tree), screenshots
-(`HardCopy`), text edit / ABAP editor controls, automated tests and CI. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§13.
+In use against a development system since 2026-11-04. Open: context menus (grid/tree), text edit /
+ABAP editor controls, automated tests and CI. History and findings:
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§14.

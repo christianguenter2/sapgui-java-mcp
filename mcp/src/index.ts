@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // sapgui-java-mcp – MCP server for SAP GUI for Java (via scripts/bridge.js)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { call, readConfig, readInfo, BridgeError } from "./bridge.js";
@@ -129,6 +130,29 @@ server.registerTool("sap_user_formats", {
     `\ne.g. amount 2000.50 → ${f.decimal.startsWith("1.") ? "2000,50" : f.decimal.startsWith("1,") ? "2000.50" : "2000,50"}, ` +
     `date 30 June 2026 → ${f.date.replace("DD", "30").replace("MM", "06").replace("YYYY", "2026")}`;
 }));
+
+server.registerTool("sap_screenshot", {
+  title: "Screenshot",
+  description: "PNG of the active window of a session (or the given window, e.g. wnd[1]) via SAP GUI's HardCopy. " +
+    "Returns the image itself plus the saved path (~/.sapgui-java-mcp/screenshots/, last 20 kept). " +
+    "Use it when the screen model is not enough: layout, column headings, colours, icons, or to show the user what you see.",
+  inputSchema: { window: z.string().optional().describe("e.g. wnd[1]; default the active window"), session },
+  annotations: { readOnlyHint: true },
+}, async (a) => {
+  try {
+    const r = await call("screenshot", a);
+    const data = (await readFile(r.path)).toString("base64");
+    const ses = r.session;
+    return {
+      content: [
+        { type: "image" as const, data, mimeType: "image/png" },
+        { type: "text" as const, text: `${ses.system}/${ses.client} ${String(ses.id).replace(/^\/app\/con\[\d+\]\//, "")} ${ses.transaction} ${ses.program}/${ses.screen} ${r.window} ${JSON.stringify(r.title)} – ${r.width}×${r.height}, ${Math.round(r.bytes / 1024)} KB, saved ${r.path}` },
+      ],
+    };
+  } catch (e: any) {
+    return { content: [{ type: "text" as const, text: e instanceof BridgeError ? e.message : `unexpected error: ${e?.message ?? e}` }], isError: true };
+  }
+});
 
 server.registerTool("sap_open_session", {
   title: "Open own session",

@@ -254,3 +254,13 @@ passes in `sapgui-java-mcp.script`). Launcher: `scripts/install-autostart.sh`.
   &DATA_SAVE refused by the gate.
 - Still open: context menus (grid `contextMenu()` / tree `nodeContextMenu()` open a GuiContextMenu
   that has no select path in the Java wrappers yet).
+
+## 14. Screenshots – 2026-11-05
+
+`GuiFrameWindowWrapper.HardCopy(String name, int... format)` → `GuiFrameWindow.HardCopy`: writes
+only into the session's temp or work directory (relative names resolved there, other paths
+rejected), registers the file for cleanup at session end, returns the path; `format[0]` is the
+`BitmapFormat` ordinal (bmp 0, jpg 1, **png 2**, gif 3, tiff 4), the image is the window's root pane.
+`/screenshot` copies the PNG to `~/.sapgui-java-mcp/screenshots/` (700/600, newest 20 kept) and returns
+path and size; `sap_screenshot` returns it as MCP image content. Verified for a main window
+(1667×1362) and a pop-up `wnd[1]` (944×858). Read-only – not gated, works in `readOnly` mode.

@@ -23,6 +23,7 @@
 //             (scrolls the table for rows outside the visible page)
 //   /session_open  {session?}             open a new session (createSession) next to the given one; returns its id
 //   /session_close {session}              close a session the bridge opened (user sessions are refused)
+//   /screenshot {session?, window?}       PNG of the active (or given) window → ~/.sapgui-java-mcp/screenshots/
 //   /reload                               re-load this bridge file (path from __FILE__ or config bridgeScript)
 //   /stop                                 stop the bridge
 // Action endpoints return the resulting screen summary unless {"returnScreen": false}.
@@ -38,7 +39,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.7.0";
+  var BRIDGE_VERSION = "0.8.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -479,6 +480,38 @@
       else if (e.type === "GuiButton" && /\/tbar\[0\]\/btn\[\d+\]$/.test(e.id)) buttons.push({ id: e.id, text: str(e.tooltip || e.text).trim() });
     }
     return { title: str(tryCall(function () { return win.getText(); }, "")), texts: texts, buttons: buttons };
+  }
+
+  // ------------------------------------------------------------ screenshot
+  // GuiFrameWindow.HardCopy(name, format) writes only into the session's temp/work dir and registers the
+  // file for cleanup at session end → copy it to ~/.sapgui-java-mcp/screenshots/ (mode 600, last 20 kept).
+  var SHOT_DIR = dir.resolve("screenshots");
+  var PNG = 2;   // GuiFrameWindow.BitmapFormat: bmp, jpg, png, gif, tiff
+  function opScreenshot(ses, body) {
+    var wid = body.window ? str(body.window) : tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+    var win = findEl(ses, wid);
+    var stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    var sesShort = str(ses.getId()).replace(/^\/app\//, "").replace(/[^A-Za-z0-9]+/g, "_").replace(/_$/, "");
+    var name = "sapgui-mcp-" + stamp + ".png";
+    var src = str(win.HardCopy(name, Java.to([PNG], "int[]")));
+    if (src === "") fail(500, "HardCopy returned no file");
+    Files.createDirectories(SHOT_DIR);
+    try { Files.setPosixFilePermissions(SHOT_DIR, PosixFilePermissions.fromString("rwx------")); } catch (e) { }
+    var dest = SHOT_DIR.resolve(sesShort + "_" + wid.replace(/[^A-Za-z0-9]+/g, "") + "_" + stamp + ".png");
+    Files.copy(Paths.get(src), dest, Java.type("java.nio.file.StandardCopyOption").REPLACE_EXISTING);
+    chmod600(dest);
+    tryCall(function () { Files.deleteIfExists(Paths.get(src)); return 0; }, 0);
+    // keep the newest 20
+    var all = toList(tryCall(function () {
+      return Java.from(Files.list(SHOT_DIR).filter(function (x) { return /\.png$/.test(str(x.getFileName())); }).sorted().toArray());
+    }, []));
+    for (var i = 0; i < all.length - 20; i++) tryCall(function () { Files.deleteIfExists(all[i]); return 0; }, 0);
+    var img = tryCall(function () { return Java.type("javax.imageio.ImageIO").read(dest.toFile()); }, null);
+    return {
+      ok: true, path: str(dest), window: wid, title: str(tryCall(function () { return win.getText(); }, "")),
+      width: img === null ? null : Number(img.getWidth()), height: img === null ? null : Number(img.getHeight()),
+      bytes: Number(Files.size(dest)), session: sessionInfo(ses)
+    };
   }
 
   // ------------------------------------------------------- agent sessions
@@ -1157,6 +1190,7 @@
             case "/table": res = opTable(ses, body); break;
             case "/session_open": res = opSessionOpen(body); break;
             case "/grid_action": res = opGridAction(ses, body); break;
+            case "/screenshot": res = opScreenshot(ses, body); break;
             case "/tree_action": res = opTreeAction(ses, body); break;
             case "/session_close": res = opSessionClose(body); break;
             default: fail(404, "unknown endpoint " + path);
