@@ -21,7 +21,7 @@ const server = new McpServer(
       "(by default only what changed on the same screen, or a compact view of a new screen), so do not call " +
       "sap_screen again after an action; use view=full only when an element seems to be missing. Always read the status bar: [E] = error, [W] = warning, " +
       "[S] = success. Pop-ups appear as wnd[1], wnd[2]; their question and answer buttons are shown in a POPUP block – read it before answering, never guess. ALV grids and trees show up as control=SapGridWrapper / " +
-      "SapTreeWrapper – read them with sap_read_grid / sap_read_tree; classic table controls (type TableControl) " +
+      "SapTreeWrapper – read them with sap_read_grid / sap_read_tree and act on them with sap_grid_action / sap_tree_action; classic table controls (type TableControl) " +
       "with sap_read_table. Ask the user before saving data (Ctrl+S / " +
       "save buttons) or changing anything outside development/customizing tasks; the write gate enforces this: " +
       "Save/Post only run with confirm=true plus expect. Type amounts and dates in the user's formats (sap_user_formats, once per session). Pass expect (e.g. \"SAPLXYZ/200\", " +
@@ -280,6 +280,36 @@ server.registerTool("sap_reload_bridge", {
   }
   throw new BridgeError("bridge did not come back within 10 s – check ~/.sapgui-java-mcp/bridge.log (reload-error) or restart it from the Scripting menu");
 }));
+
+server.registerTool("sap_grid_action", {
+  title: "ALV grid action",
+  description: "Act on an ALV grid (control=SapGridWrapper): setCurrentCell, click, doubleClick, pressButton (button cell) with row + column " +
+    "(technical name); selectRows (rows \"0,2-4\"), selectAll, clearSelection; pressColumnHeader (column); pressToolbar (button = toolbar id " +
+    "from sap_read_grid); pressToolbarContext (menu button, optional menuItem); selectToolbarMenuItem (menuItem). Returns the resulting screen. " +
+    "Toolbar buttons that save/delete/post are gated (confirm + expect).",
+  inputSchema: {
+    id: z.string().describe("Grid id, e.g. wnd[0]/shellcont/shell"),
+    action: z.enum(["setCurrentCell", "click", "doubleClick", "pressButton", "selectRows", "selectAll", "clearSelection",
+      "pressColumnHeader", "pressToolbar", "pressToolbarContext", "selectToolbarMenuItem"]),
+    row: z.number().int().min(0).optional(), column: z.string().optional(),
+    rows: z.string().optional().describe("selectRows: \"0\", \"0,2\", \"3-7\""),
+    button: z.string().optional(), menuItem: z.string().optional(),
+    session, view, expect, confirm,
+  },
+}, async (a) => run(async () => withScreen(`grid ${a.action}`, await call("grid_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
+
+server.registerTool("sap_tree_action", {
+  title: "Tree action",
+  description: "Act on a tree (control=SapTreeWrapper) by node key from sap_read_tree: select, expand, collapse, doubleClick; " +
+    "selectItem, doubleClickItem, clickLink, pressButton, checkbox (need item = column name or item index); unselectAll. Returns the resulting screen.",
+  inputSchema: {
+    id: z.string().describe("Tree id from sap_screen"),
+    action: z.enum(["select", "expand", "collapse", "doubleClick", "selectItem", "doubleClickItem", "clickLink", "pressButton", "checkbox", "unselectAll"]),
+    node: z.string().optional().describe("Node key from sap_read_tree"),
+    item: z.string().optional(), checked: z.boolean().optional(),
+    session, view, expect, confirm,
+  },
+}, async (a) => run(async () => withScreen(`tree ${a.action} ${a.node ?? ""}`.trim(), await call("tree_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
 server.registerTool("sap_read_tree", {
   title: "Read tree",

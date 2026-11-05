@@ -17,6 +17,8 @@
 //   /command  {session?, command}         sendCommand (OK-code, e.g. "/nSE16N")
 //   /grid     {session?, id, firstRow?, maxRows?, columns?}   ALV grid rows
 //   /tree     {session?, id, maxNodes?}   tree nodes (key, parent, text, folder, expanded)
+//   /grid_action {session?, id, action, row?, column?, rows?, button?, menuItem?}   ALV grid actions
+//   /tree_action {session?, id, action, node, item?, checked?}                     tree actions
 //   /table    {session?, id, firstRow?, maxRows?, columns?, skipEmpty?}   dynpro table control rows
 //             (scrolls the table for rows outside the visible page)
 //   /session_open  {session?}             open a new session (createSession) next to the given one; returns its id
@@ -36,7 +38,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.6.0";
+  var BRIDGE_VERSION = "0.7.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -206,6 +208,8 @@
   // question of a confirmation pop-up that leads to a write when answered with Yes
   var COMMIT_QUESTION = /\b(save|post|close|delete|reverse|release|create|cancel the|speichern|sichern|buchen|schlie(ss|ß)en|l(ö|oe)schen|stornieren|freigeben|anlegen|erstellen)\b/i;
   var YES_BUTTON = /(SPOP-OPTION1|BUTTON_1|BUTTON_YES)$/;
+  // ALV function codes that write: &DATA_SAVE, &SAVE, &DELETE, &LOCAL&DELETE_ROW, &POST …
+  var ALV_WRITE_CODES = /(SAVE|DELETE|DELE|POST|BUCH|SICH|RELEASE|REVERSE|STORNO)/i;
 
   // texts of the active modal window, or null when wnd[0] is active
   function popupTexts(ses) {
@@ -229,6 +233,16 @@
       }
     }
     if (path === "/command" && SAVE_CODES.test(str(body.command).trim())) return "OK-code " + str(body.command).trim();
+    // ALV toolbar buttons and toolbar menu entries (function codes like &DATA_SAVE, &DELETE)
+    if (path === "/grid_action" && /^(pressToolbar|pressToolbarContext|selectToolbarMenuItem)$/.test(str(body.action))) {
+      var code = str(body.action === "selectToolbarMenuItem" ? body.menuItem : (body.menuItem || body.button));
+      var g = tryCall(function () { return findEl(ses, body.id); }, null);
+      var tbb = g === null ? null : tryCall(function () { return gridToolbarButton(g, str(body.button)); }, null);
+      var label = tbb === null ? "" : (tbb.text || tbb.tooltip);
+      if (ALV_WRITE_CODES.test(code) || SAVE_WORDS.test(label) || COMMIT_WORDS.test(label) ||
+          (tbb !== null && (SAVE_WORDS.test(tbb.tooltip) || COMMIT_WORDS.test(tbb.tooltip))))
+        return "ALV toolbar " + code + (label ? " " + JSON.stringify(label) : "");
+    }
     if (path === "/press") {
       var el = tryCall(function () { return findEl(ses, body.id); }, null);
       if (el === null) return null;
@@ -259,6 +273,19 @@
     if (!body.expect)
       fail(428, "write gate: " + w + " is confirmed but has no expect – a confirmed write must name the screen it " +
         "is meant for. Nothing was done. Session is on " + whereText(ses));
+  }
+
+  // Modal guard: while a pop-up (wnd[n], n ≥ 1) is active, actions on elements of a window below it
+  // are refused – e.g. a grid double-click in wnd[0] behind an open "Sort Order" pop-up stacked a
+  // third window on top. Answer or close the pop-up first.
+  var ELEMENT_OPS = { "/set": 1, "/press": 1, "/grid_action": 1, "/tree_action": 1, "/grid": 0, "/table": 0, "/tree": 0 };
+  function checkModal(ses, path, body) {
+    if (!ELEMENT_OPS[path] || !body.id) return;
+    var act = tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+    var am = /^wnd\[(\d+)\]/.exec(act), em = /^(?:\/app\/con\[\d+\]\/ses\[\d+\]\/)?wnd\[(\d+)\]/.exec(str(body.id));
+    if (am && em && Number(em[1]) < Number(am[1]))
+      fail(409, "pop-up " + act + " " + JSON.stringify(str(tryCall(function () { return ses.getActiveWindow().getText(); }, ""))) +
+        " is open – answer or close it first (element " + body.id + " is in a window behind it). Nothing was done.");
   }
 
   function checkAllowed(ses, cfg, isWrite) {
@@ -658,7 +685,10 @@
     return {
       id: relId(g.getId()), title: str(tryCall(function () { return g.getTitle(); }, "")),
       rowCount: rowCount, firstRow: first, returned: rows.length, columns: colInfo, rows: rows,
-      emptyRows: stillEmpty, retried: empty.length
+      emptyRows: stillEmpty, retried: empty.length,
+      selectedRows: str(tryCall(function () { return g.getSelectedRows(); }, "")),
+      currentCell: { row: tryCall(function () { return Number(g.getCurrentCellRow()); }, -1), column: str(tryCall(function () { return g.getCurrentCellColumn(); }, "")) },
+      toolbar: gridToolbar(g)
     };
   }
 
@@ -818,6 +848,84 @@
     };
   }
 
+  // ALV grid toolbar: ids are the function codes for /grid_action pressToolbar
+  function gridToolbar(g) {
+    var n = Number(tryCall(function () { return g.getToolbarButtonCount(); }, 0));
+    var out = [];
+    for (var b = 0; b < n; b++) {
+      var bid = str(tryCall(function () { return g.getToolbarButtonId(b); }, ""));
+      var btype = str(tryCall(function () { return g.getToolbarButtonType(b); }, ""));
+      if (bid === "" && /separator/i.test(btype)) continue;
+      out.push({
+        id: bid, type: btype,
+        text: str(tryCall(function () { return g.getToolbarButtonText(b); }, "")).trim(),
+        tooltip: str(tryCall(function () { return g.getToolbarButtonTooltip(b); }, "")).trim(),
+        enabled: !!tryCall(function () { return g.getToolbarButtonEnabled(b); }, true)
+      });
+    }
+    return out;
+  }
+
+  function gridToolbarButton(g, id) {
+    var tb = gridToolbar(g);
+    for (var i = 0; i < tb.length; i++) if (tb[i].id === id) return tb[i];
+    return null;
+  }
+
+  // /grid_action {id, action, row?, column?, rows?, button?, menuItem?}
+  function opGridAction(ses, body) {
+    var g = findEl(ses, body.id);
+    if (str(g.getClass().getSimpleName()) !== "SapGridWrapper") fail(400, "not an ALV grid: " + relId(g.getId()));
+    var a = str(body.action), row = body.row === undefined ? -1 : Number(body.row), col = str(body.column);
+    function needCell() { if (row < 0 || col === "") fail(400, "action " + a + " needs row and column (technical column name)"); }
+    switch (a) {
+      case "setCurrentCell": needCell(); g.setCurrentCell(row, col); break;
+      case "click": needCell(); g.click(row, col); break;
+      case "doubleClick": needCell(); g.doubleClick(row, col); break;
+      case "pressButton": needCell(); g.pressButton(row, col); break;           // button cell
+      case "selectRows": if (str(body.rows) === "") fail(400, "selectRows needs rows, e.g. \"0,2-4\""); g.setSelectedRows(str(body.rows)); break;
+      case "selectAll": g.selectAll(); break;
+      case "clearSelection": g.clearSelection(); break;
+      case "pressColumnHeader": if (col === "") fail(400, "pressColumnHeader needs column"); g.pressColumnHeader(col); break;
+      case "pressToolbar":
+        if (str(body.button) === "") fail(400, "pressToolbar needs button (toolbar id from sap_read_grid)");
+        var tb = gridToolbarButton(g, str(body.button));
+        if (tb !== null && !tb.enabled) fail(409, "toolbar button " + body.button + " is disabled");
+        g.pressToolbarButton(str(body.button)); break;
+      case "pressToolbarContext":                                           // menu button → opens its menu
+        if (str(body.button) === "") fail(400, "pressToolbarContext needs button");
+        g.pressToolbarContextButton(str(body.button));
+        if (str(body.menuItem) !== "") g.selectToolbarMenuItem(str(body.menuItem));
+        break;
+      case "selectToolbarMenuItem": if (str(body.menuItem) === "") fail(400, "selectToolbarMenuItem needs menuItem"); g.selectToolbarMenuItem(str(body.menuItem)); break;
+      default: fail(400, "unknown grid action " + a + " (setCurrentCell, click, doubleClick, pressButton, selectRows, selectAll, clearSelection, pressColumnHeader, pressToolbar, pressToolbarContext, selectToolbarMenuItem)");
+    }
+    return after(ses, body, { ok: true, id: relId(g.getId()), action: a });
+  }
+
+  // /tree_action {id, action, node, item?, checked?}
+  function opTreeAction(ses, body) {
+    var t = findEl(ses, body.id);
+    if (str(t.getClass().getSimpleName()) !== "SapTreeWrapper") fail(400, "not a tree: " + relId(t.getId()));
+    var a = str(body.action), node = str(body.node), item = str(body.item);
+    if (node === "" && a !== "unselectAll") fail(400, "action " + a + " needs node (key from sap_read_tree)");
+    function needItem() { if (item === "") fail(400, "action " + a + " needs item (column name / item index)"); }
+    switch (a) {
+      case "select": t.selectNode(node); break;
+      case "expand": t.expandNode(node); break;
+      case "collapse": t.collapseNode(node); break;
+      case "doubleClick": t.doubleClickNode(node); break;
+      case "selectItem": needItem(); t.selectItem(node, item); break;
+      case "doubleClickItem": needItem(); t.doubleClickItem(node, item); break;
+      case "clickLink": needItem(); t.clickLink(node, item); break;
+      case "pressButton": needItem(); t.pressButton(node, item); break;
+      case "checkbox": needItem(); t.changeCheckbox(node, item, body.checked !== false); break;
+      case "unselectAll": t.unselectAll(); break;
+      default: fail(400, "unknown tree action " + a + " (select, expand, collapse, doubleClick, selectItem, doubleClickItem, clickLink, pressButton, checkbox, unselectAll)");
+    }
+    return after(ses, body, { ok: true, id: relId(t.getId()), action: a, node: node });
+  }
+
   // Trees: type 0 = simple, 1 = list tree, 2 = column tree. In list and column trees the visible
   // texts live in items (getItemText(key, column)); getNodeTextByKey() is often empty there
   // (SE03 tool tree: only the report names came back as keys).
@@ -970,7 +1078,7 @@
   var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
   server.setExecutor(Executors.newSingleThreadExecutor());
 
-  var WRITE_OPS = { "/set": 1, "/press": 1, "/vkey": 1, "/tcode": 1, "/command": 1, "/session_open": 1, "/session_close": 1 };
+  var WRITE_OPS = { "/set": 1, "/press": 1, "/vkey": 1, "/tcode": 1, "/command": 1, "/session_open": 1, "/session_close": 1, "/grid_action": 1, "/tree_action": 1 };
 
   function respond(ex, code, obj) {
     var bytes = new JString(JSON.stringify(obj)).getBytes("UTF-8");
@@ -1033,6 +1141,7 @@
           rec.system = checkAllowed(ses, cfg, !!WRITE_OPS[path]);
           rec.system = rec.system.system + "/" + rec.system.client;
           if (path !== "/screen") checkExpect(ses, body);
+          checkModal(ses, path, body);
           checkWrite(ses, cfg, path, body, rec);
           switch (path) {
             case "/screen": res = screen(ses, body); break;
@@ -1045,6 +1154,8 @@
             case "/tree": res = opTree(ses, body); break;
             case "/table": res = opTable(ses, body); break;
             case "/session_open": res = opSessionOpen(body); break;
+            case "/grid_action": res = opGridAction(ses, body); break;
+            case "/tree_action": res = opTreeAction(ses, body); break;
             case "/session_close": res = opSessionClose(body); break;
             default: fail(404, "unknown endpoint " + path);
           }

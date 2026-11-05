@@ -233,3 +233,24 @@ loader** – without setting it to the GUI loader `mScriptEngine` stays null. `g
 without the agent, and the agent never writes to stdout. Verified by attaching to the running GUI
 (bridge event `autostart`, screen access in the agent session, `/reload` via the path the agent
 passes in `sapgui-java-mcp.script`). Launcher: `scripts/install-autostart.sh`.
+
+## 13. Grid and tree actions – 2026-11-05
+
+- `/grid_action` (SapGridWrapper): setCurrentCell, click, doubleClick, pressButton (row + technical
+  column), selectRows (`"0,2-4"`), selectAll, clearSelection, pressColumnHeader, pressToolbar,
+  pressToolbarContext (+ menuItem), selectToolbarMenuItem. `/grid` now also returns the toolbar
+  (`getToolbarButtonId/Text/Tooltip/Type/Enabled`; separators dropped), selected rows, current cell.
+- `/tree_action` (SapTreeWrapper): select, expand, collapse, doubleClick, selectItem, doubleClickItem,
+  clickLink, pressButton, checkbox, unselectAll.
+- Write gate: ALV toolbar buttons / toolbar menu entries whose function code matches
+  SAVE|DELETE|POST|BUCH|SICH|RELEASE|REVERSE|STORNO, or whose text/tooltip is a save/commit word.
+- **Modal guard** (new, from the test): a grid double-click in `wnd[0]` went through while the "Sort
+  Order" pop-up `wnd[1]` was open and stacked a third window. Now actions (`/set`, `/press`,
+  `/grid_action`, `/tree_action`) on elements of a window below the active modal window → 409.
+  Reads stay allowed.
+- Verified on DEV: SE03 tool tree doubleClick RSWBO052 opens the report (replaces the SA38 detour);
+  Easy Access collapse/expand; SE16H T001 grid toolbar listing, selectRows, setCurrentCell,
+  &SORT_DSC (opens the sort dialog – ALV sorts by selected *column*), doubleClick → detail pop-up;
+  &DATA_SAVE refused by the gate.
+- Still open: context menus (grid `contextMenu()` / tree `nodeContextMenu()` open a GuiContextMenu
+  that has no select path in the Java wrappers yet).

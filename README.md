@@ -75,6 +75,8 @@ screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_field
 | `sap_send_key` | named key (Enter, Back, Execute, Save, Cancel, PageDown, …) or numeric VKey; optional `window` |
 | `sap_send_command` | send an OK-code (`command`, e.g. `/nSE16N`) |
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`); scrolls and waits for lazily loaded rows, warns about rows that stayed empty |
+| `sap_grid_action` | ALV grid: `setCurrentCell`, `click`, `doubleClick`, `pressButton` (row + column), `selectRows` (`"0,2-4"`), `selectAll`, `clearSelection`, `pressColumnHeader`, `pressToolbar` (button id from `sap_read_grid`), `pressToolbarContext` / `selectToolbarMenuItem` |
+| `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll` |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true) |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns; texts the scripting API misses are read from the tree model |
 | `sap_user_formats` | date format, decimal notation, time format of the user (SU3 defaults, read in a separate session that is closed again; cached) |
@@ -105,7 +107,9 @@ screen guard: program SAPLXYZ ≠ SAPLSE16N, screen 202 ≠ 120 – nothing was 
 Session is on SE16H SAPLSE16N/120 wnd[0] "General Table Display"
 ```
 
-Use it on every Save/Post and whenever the user may work in the same session. All other errors also
+Use it on every Save/Post and whenever the user may work in the same session.
+While a pop-up (`wnd[1]`…) is active, actions on elements of a window behind it are refused
+("answer or close it first"); reading stays possible. All other errors also
 name the current screen (`element not found: … | session is on …`).
 
 ### Write gate (`confirm` parameter)

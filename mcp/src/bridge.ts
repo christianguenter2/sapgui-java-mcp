@@ -44,7 +44,7 @@ export async function readConfig(): Promise<McpConfig> {
 
 // Endpoints that act on a session. Without an explicit "session" they go to the agent's own session
 // (see session.ts) – never silently to the session the user is working in.
-const SESSION_ENDPOINTS = new Set(["screen", "set", "press", "vkey", "tcode", "command", "grid", "table", "tree"]);
+const SESSION_ENDPOINTS = new Set(["screen", "set", "press", "vkey", "tcode", "command", "grid", "table", "tree", "grid_action", "tree_action"]);
 let sessionResolver: (() => Promise<string | undefined>) | undefined;
 export function setSessionResolver(fn: () => Promise<string | undefined>) { sessionResolver = fn; }
 

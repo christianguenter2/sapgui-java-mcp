@@ -72,6 +72,8 @@ export interface Grid {
   id: string; title: string; rowCount: number; firstRow: number; returned: number;
   columns: { name: string; title: string }[]; rows: Record<string, string>[];
   emptyRows?: number[]; retried?: number;
+  selectedRows?: string; currentCell?: { row: number; column: string };
+  toolbar?: { id: string; type: string; text: string; tooltip: string; enabled: boolean }[];
 }
 
 export interface Table {
@@ -112,6 +114,10 @@ export function formatGrid(g: Grid): string {
   const lines = [head, "columns: " + g.columns.map(c => `${c.name}=${q(c.title)}`).join(", "), cols.join("\t")];
   for (const r of g.rows) lines.push(cols.map(c => (r[c] ?? "").replace(/[\t\n]/g, " ")).join("\t"));
   if (g.firstRow + g.returned < g.rowCount) lines.push(`… more rows: call again with firstRow=${g.firstRow + g.returned}`);
+  if (g.toolbar?.length)
+    lines.push("toolbar (sap_grid_action pressToolbar button=<id>): " + g.toolbar.map(b =>
+      `${b.id}=${q(b.text || b.tooltip)}${/menu/i.test(b.type) ? " (menu)" : ""}${b.enabled ? "" : " (disabled)"}`).join(", "));
+  if (g.selectedRows) lines.push(`selected rows: ${g.selectedRows}`);
   if (g.emptyRows?.length)
     lines.push(`WARNING: rows ${g.emptyRows.join(",")} came back completely empty after scrolling and one retry – ` +
       `the grid may not have loaded them; read them again with firstRow before relying on them`);
