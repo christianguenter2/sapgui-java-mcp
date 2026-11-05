@@ -244,12 +244,25 @@ cd mcp && npm test        # build + unit tests (node:test): views, id splitting,
 ```
 
 CI (GitHub Actions) runs the unit tests, syntax checks of the bridge and the shell scripts, compiles
-the bridge agent and checks that bridge, MCP server and changelog carry the same version. Everything
-that talks to SAP GUI is tested manually against real systems.
+the bridge agent and checks that bridge, MCP server and changelog carry the same version.
+
+**Live regression test** (needs a logged-on SAP GUI with the bridge; not in CI):
+
+```
+cd mcp && npm run test:live -- --system DEV/100 [--abap-program ZMY_PROGRAM]
+```
+
+It drives the MCP server like an agent in its own session, with standard objects only and without
+saving anything: version check, Easy Access tree + context menu + write gate on "Delete All
+Favorites", screen guard and Save gate, table display (SE16H or S416H, T000) as ALV grid + context
+menu, ABAP editor in display mode (RSPARAM: read, write refused), TextEdit (`SAPTEXTEDIT_DEMO_1`),
+an agent session ended by SAP (`/i`), screenshot. `--abap-program` (a program of your own, e.g. in
+`$TMP`) adds the change-mode test: a line is inserted, Check must report it, the editor is left with
+"No". Prints PASS/FAIL per step and the call log on failure; exit code 1 on any failure.
 
 ## Status
 
-Experimental, in use against development and trial systems since 2026-11-04. Open: tests against a live SAP GUI. History and findings:
+Experimental, in use against development and trial systems since 2026-11-04. History and findings:
 [docs/mcp-outline.md](docs/mcp-outline.md) §7–§19.
 
 ## License

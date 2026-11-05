@@ -642,7 +642,18 @@
   }
 
   // ----------------------------------------------------------- operations
+  // drop agent session ids that no longer exist – SAP reuses ids, and a new user session must not
+  // inherit the "agent" mark of a closed agent session
+  function pruneAgentSet() {
+    var live = {}, ids = tryCall(allSessionIds, null);
+    if (ids === null) return;
+    for (var i = 0; i < ids.length; i++) live[ids[i]] = 1;
+    var it = agentSet().iterator();
+    while (it.hasNext()) if (!live[str(it.next())]) it.remove();
+  }
+
   function opStatus() {
+    pruneAgentSet();
     var app = getApp();
     var res = {
       bridge: BRIDGE_VERSION, pid: MY_PID,
@@ -1550,6 +1561,7 @@
           msg = "the session was closed by this action (the action itself went through; SAP ended the session) – " +
             "the next call opens a new agent session; check sap_status";
           ses = null;
+          pruneAgentSet();
         }
         // context for the caller: where the session is now (guard errors already say it)
         if (typeof ses !== "undefined" && ses !== null && code !== 409 && code !== 401 && code !== 403 && msg.indexOf("Session is on") < 0)

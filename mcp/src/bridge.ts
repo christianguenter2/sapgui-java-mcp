@@ -89,6 +89,11 @@ const SESSION_ENDPOINTS = new Set(["screen", "set", "press", "vkey", "tcode", "c
   "grid_action", "tree_action", "screenshot", "list", "text", "text_set", "session_open", "session_close"]);
 let sessionResolver: ((system?: string) => Promise<string | undefined>) | undefined;
 export function setSessionResolver(fn: (system?: string) => Promise<string | undefined>) { sessionResolver = fn; }
+// drops a resolved agent session that turned out to be gone (closed by SAP or by the user)
+let sessionForget: ((ref: string) => void) | undefined;
+export function setSessionForget(fn: (ref: string) => void) { sessionForget = fn; }
+const SESSION_GONE = /^session not found:/;                       // nothing was done – safe to retry
+const SESSION_ENDED = /the session was closed by this action/;     // the action ran – never repeat it
 
 /** Low level: one request to one bridge. */
 export async function callBridge<T = any>(b: BridgeInfo, endpoint: string, body: Record<string, unknown> = {}): Promise<T> {
@@ -129,12 +134,13 @@ function tagRefs(data: any, pid: number, count: number) {
 export async function call<T = any>(endpoint: string, body: Record<string, unknown> = {}): Promise<T> {
   const bridges = await listBridges();
   if (!bridges.length) throw new BridgeError(NOT_RUNNING);
-  const { system, ...rest } = body as { system?: string } & Record<string, unknown>;
+  const { system, __retried, ...rest } = body as { system?: string; __retried?: boolean } & Record<string, unknown>;
   let payload: Record<string, unknown> = rest;
   let target = bridges[0];
+  let resolved: string | undefined;            // agent session picked here (not passed by the caller)
   if (SESSION_ENDPOINTS.has(endpoint)) {
     let ref = typeof rest.session === "string" && rest.session !== "" ? rest.session : undefined;
-    if (!ref && sessionResolver && endpoint !== "session_open") ref = await sessionResolver(system);
+    if (!ref && sessionResolver && endpoint !== "session_open") ref = resolved = await sessionResolver(system);
     if (ref) {
       const p = parseRef(ref);
       if (p.pid !== undefined) {
@@ -148,7 +154,17 @@ export async function call<T = any>(endpoint: string, body: Record<string, unkno
       payload = { ...rest, session: p.session };
     }
   }
-  const data = await callBridge<T>(target, endpoint, payload);
+  let data: T;
+  try { data = await callBridge<T>(target, endpoint, payload); }
+  catch (e: any) {
+    // the cached agent session is gone (SAP ended it, e.g. Exit from a transaction): forget it; when
+    // nothing was done, retry once – the resolver opens a new agent session
+    if (resolved && e instanceof BridgeError && (SESSION_GONE.test(e.message) || SESSION_ENDED.test(e.message))) {
+      sessionForget?.(resolved);
+      if (SESSION_GONE.test(e.message) && !(body as any).__retried) return call<T>(endpoint, { ...body, __retried: true });
+    }
+    throw e;
+  }
   tagRefs(data, target.pid, bridges.length);
   return data;
 }

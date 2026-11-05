@@ -7,7 +7,7 @@
 // if it was closed, and adopted from the bridge after an MCP restart. Which system when none is given:
 // the only one logged on, else config defaultSystem, else the one used last.
 // Passing session explicitly (e.g. "con[0]/ses[0]") is the user handing a session over.
-import { call, readConfig, setSessionResolver, allSessions, SessionRow, BridgeError } from "./bridge.js";
+import { call, readConfig, setSessionResolver, setSessionForget, allSessions, SessionRow, BridgeError } from "./bridge.js";
 
 const agents = new Map<string, string>();    // "SID/CLIENT" → session ref
 const checkedAt = new Map<string, number>();
@@ -77,4 +77,5 @@ export async function closeAgentSession(session?: string, system?: string): Prom
   return r.closedRef ?? r.closed;
 }
 
+setSessionForget(ref => { for (const [k, v] of agents) if (v === ref) { agents.delete(k); checkedAt.delete(k); } });
 setSessionResolver(async (system?: string) => ((await readConfig()).ownSession ? ensureAgentSession(system) : undefined));

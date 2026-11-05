@@ -13,8 +13,13 @@ All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP s
 
 ### Changed
 - Screen summaries show editors as `lines=N` (+ ro / editable / modified) instead of the whole text.
-- An action that ends the session (e.g. Exit from a transaction) reports that clearly instead of a
-  Java exception.
+- An action that ends the session (e.g. Exit from a transaction, `/i`) reports that clearly instead
+  of a Java exception; the MCP server forgets that agent session, and a call that hit an already
+  closed agent session is retried once in a new one (it went to the stale session before). The bridge
+  drops ids of closed agent sessions, so a new user session that gets the same id is not taken for
+  the agent's.
+- `npm run test:live` – live regression test against a logged-on SAP GUI (see README → Tests).
+- `mcp/package-lock.json` carries the package version again.
 
 ## [0.11.0] – 2026-11-05
 

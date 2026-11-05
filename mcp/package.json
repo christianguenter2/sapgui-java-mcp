@@ -11,6 +11,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "smoke": "node dist/smoke.js",
+    "test:live": "npm run build && node dist/live-test.js",
     "test": "npm run build && node --test test/"
   },
   "engines": {

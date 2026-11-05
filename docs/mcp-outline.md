@@ -369,3 +369,20 @@ range, Check; left with "No" – the source on the server is unchanged (no inact
 document contents (TextEdit): replace all, insert, replace a line, umlauts; left with "Exit send
 screen? Yes" without sending – which ended the agent session (SAP closed it), now reported as such.
 
+## 20. Live regression test – 2026-11-05
+
+`mcp/src/live-test.ts` (`npm run test:live -- --system SID/CLIENT [--abap-program Z…]`): an MCP
+client that spawns `dist/index.js` and runs 9 steps in the agent session – see README → Tests.
+Choices: standard objects only (T000, RSPARAM, SAPTEXTEDIT_DEMO_1, the Easy Access favorites node
+`Favo` with its code `XXDELF`), function codes instead of texts where possible (logon language),
+nothing saved. Found on its first runs:
+- **SO00 is not save-free:** every start of SO00 creates an empty RAW document in SOOD ("Document
+  moved to folder Outbox") – four on A4H25 from the tests of §19. The TextEdit step uses
+  `SAPTEXTEDIT_DEMO_1` (CL_GUI_TEXTEDIT demo, no database access; Back = LEAVE PROGRAM).
+- **Stale agent session:** after SAP ended the agent session, the MCP server kept using the cached
+  ref for up to 10 s ("session not found"). `call()` now forgets the agent session on "session not
+  found" (nothing done → retried once, the resolver opens a new one) and on "closed by this action"
+  (no retry – the action ran). The bridge prunes closed ids from its agent set on `/status` and on
+  that error, since SAP reuses session ids.
+A4H/001 run: 9/9 in about 9 s.
+
