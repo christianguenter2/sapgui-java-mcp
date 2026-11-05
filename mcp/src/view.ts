@@ -32,7 +32,7 @@ const baseName = (id: string) => lastPart(id).replace(PREFIX, "").replace(/\[\d+
 function header(s: Screen): string[] {
   const ses = s.session;
   const active = s.windows.find(w => w.id === s.activeWindow);
-  const lines = [`${ses.system}/${ses.client} ${ses.user} | ${ses.transaction} ${ses.program}/${ses.screen} | active ${s.activeWindow}: ${q(active?.title)}`];
+  const lines = [`${ses.system}/${ses.client} ${ses.user} ${ses.id.replace(/^\/app\/con\[\d+\]\//, "")} | ${ses.transaction} ${ses.program}/${ses.screen} | active ${s.activeWindow}: ${q(active?.title)}`];
   if (s.windows.length > 1) lines.push("windows: " + s.windows.map(w => `${w.id} ${w.type.replace(/^Gui/, "")} ${q(w.title)}`).join("; "));
   const sb = s.statusBar;
   lines.push(sb && sb.text ? `status: [${sb.type || "-"}] ${sb.text}${sb.id ? ` (${sb.id}/${sb.number})` : ""}` : "status: (empty)");

@@ -7,12 +7,15 @@ import { call, readConfig, readInfo, BridgeError } from "./bridge.js";
 import { formatGrid, formatTable, Screen, Grid, Table } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
 import { userFormats, cachedFormats } from "./formats.js";
+import { agentSession, openAgentSession, closeAgentSession, ensureAgentSession } from "./session.js";
 
 const server = new McpServer(
   { name: "sapgui-java", version: "0.1.0" },
   {
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
+      "You work in your OWN session (opened automatically next to the user's; see sap_status, sap_open_session) – " +
+      "the user keeps theirs. Only use the user's session when they explicitly ask. " +
       "Workflow: sap_screen to see the current window (element ids like wnd[0]/usr/ctxtFIELD), " +
       "then sap_set_fields / sap_press / sap_send_key. Every action returns the resulting screen and status bar " +
       "(by default only what changed on the same screen, or a compact view of a new screen), so do not call " +
@@ -27,7 +30,9 @@ const server = new McpServer(
   },
 );
 
-const session = z.string().optional().describe("Session path, default con[0]/ses[0]. See sap_status.");
+const session = z.string().optional().describe(
+  "Session path, e.g. con[0]/ses[1]. Default: the agent's own session (opened automatically). " +
+  "Pass the user's session (e.g. con[0]/ses[0]) only when the user explicitly asks you to work in it.");
 
 type Content = { content: { type: "text"; text: string }[]; isError?: boolean };
 const text = (t: string): Content => ({ content: [{ type: "text", text: t }] });
@@ -103,6 +108,7 @@ server.registerTool("sap_status", {
     lines.push(`${c.id} ${JSON.stringify(c.description)} ${c.connectionString}${c.disabledByServer ? " – SCRIPTING DISABLED BY SERVER (reconnect after enabling)" : ""}`);
     for (const x of c.sessions) lines.push(x.error ? `  session error: ${x.error}` :
       `  ${x.id.replace(/^\/app\//, "")}: ${x.system}/${x.client} ${x.user} ${x.language} | ${x.transaction} ${x.program}/${x.screen}${x.readOnly ? " (read-only)" : ""}` +
+      (x.agent ? (x.id.replace(/^\/app\//, "") === agentSession() ? "  ← agent session (default)" : "  (agent)") : "  (user)") +
       ((f) => f ? `\n    input formats: date ${f.date}, numbers ${f.decimal}, time ${f.time}` : "\n    input formats: unknown – call sap_user_formats")(cachedFormats(`${x.system}/${x.client}/${x.user}`)));
   }
   return lines.join("\n");
@@ -123,6 +129,23 @@ server.registerTool("sap_user_formats", {
     `\ne.g. amount 2000.50 → ${f.decimal.startsWith("1.") ? "2000,50" : f.decimal.startsWith("1,") ? "2000.50" : "2000,50"}, ` +
     `date 30 June 2026 → ${f.date.replace("DD", "30").replace("MM", "06").replace("YYYY", "2026")}`;
 }));
+
+server.registerTool("sap_open_session", {
+  title: "Open own session",
+  description: "Open a new SAP GUI session for the agent (next to the user's) and make it the default for all tools. " +
+    "Normally not needed – the first tool call opens one automatically. Use it to start fresh.",
+  inputSchema: { base: z.string().optional().describe("Session whose connection to use, default con[0]/ses[0]"), view },
+}, async (a) => run(async () => {
+  const r = await openAgentSession(a.base);
+  const scr = await call("screen", { session: r.session });
+  return `opened agent session ${r.session} (now the default)\n${renderScreen(scr, a.view ?? "status")}`;
+}));
+
+server.registerTool("sap_close_session", {
+  title: "Close own session",
+  description: "Close the agent's own session (or another session the agent opened). User sessions are refused.",
+  inputSchema: { session: z.string().optional().describe("Default: the current agent session") },
+}, async (a) => run(async () => `closed ${await closeAgentSession(a.session)}`));
 
 server.registerTool("sap_screen", {
   title: "Read current screen",

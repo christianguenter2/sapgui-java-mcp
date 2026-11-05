@@ -28,18 +28,31 @@ export async function readInfo(): Promise<BridgeInfo> {
   }
 }
 
-export interface McpConfig { deniedTransactions: string[] }
+export interface McpConfig { deniedTransactions: string[]; ownSession: boolean }
 
 export async function readConfig(): Promise<McpConfig> {
   try {
     const c = JSON.parse(await readFile(CONFIG_FILE, "utf8"));
-    return { deniedTransactions: (c.deniedTransactions ?? []).map((t: string) => String(t).toUpperCase()) };
+    return {
+      deniedTransactions: (c.deniedTransactions ?? []).map((t: string) => String(t).toUpperCase()),
+      ownSession: c.ownSession !== false,
+    };
   } catch {
-    return { deniedTransactions: [] };
+    return { deniedTransactions: [], ownSession: true };
   }
 }
 
+// Endpoints that act on a session. Without an explicit "session" they go to the agent's own session
+// (see session.ts) – never silently to the session the user is working in.
+const SESSION_ENDPOINTS = new Set(["screen", "set", "press", "vkey", "tcode", "command", "grid", "table", "tree"]);
+let sessionResolver: (() => Promise<string | undefined>) | undefined;
+export function setSessionResolver(fn: () => Promise<string | undefined>) { sessionResolver = fn; }
+
 export async function call<T = any>(endpoint: string, body: Record<string, unknown> = {}): Promise<T> {
+  if (sessionResolver && SESSION_ENDPOINTS.has(endpoint) && (body.session === undefined || body.session === "")) {
+    const s = await sessionResolver();
+    if (s) body = { ...body, session: s };
+  }
   // bridge.json is re-read on every call: port and token change when the bridge restarts
   const info = await readInfo();
   let res: Response;

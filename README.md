@@ -42,7 +42,10 @@ Env: `SAPGUI_BRIDGE_DIR` (default `~/.sapgui-java-mcp`), `SAPGUI_BRIDGE_TIMEOUT_
 
 ## Tools
 
-All tools take an optional `session` (default `con[0]/ses[0]`). Action tools return the resulting
+All tools take an optional `session`. Default: **the agent's own session** – opened automatically
+next to the user's on the first call (`createSession`), reopened if it was closed; the user keeps
+their session. Passing `session` explicitly (e.g. `con[0]/ses[0]`) hands a session over.
+`"ownSession": false` in `config.json` restores the old default `con[0]/ses[0]`. Action tools return the resulting
 screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_fields`, `sap_press`,
 `sap_send_key` and `sap_send_command` also take `expect` (screen guard) and `confirm` (write gate), below.
 
@@ -59,6 +62,8 @@ screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_field
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true) |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns; texts the scripting API misses are read from the tree model |
 | `sap_user_formats` | date format, decimal notation, time format of the user (SU3 defaults, read in a separate session that is closed again; cached) |
+| `sap_open_session` | open a new agent session and make it the default (normally automatic) |
+| `sap_close_session` | close the agent session (sessions the agent did not open are refused) |
 | `sap_reload_bridge` | reload `bridge.js` inside SAP GUI and wait until the new bridge answers |
 
 ### Screen views (`view` parameter)
@@ -125,6 +130,7 @@ Details: outline [§7](docs/mcp-outline.md#7-table-controls-table-sap_read_table
   - `deniedTransactions` – tcodes `sap_start_transaction` refuses, e.g. `["SU01"]` (MCP server)
   - `bridgeScript` – absolute path of `bridge.js`, needed for reload
   - `confirmWrites` – default `true`: Save/Post need `confirm` + `expect` (bridge)
+  - `ownSession` – default `true`: tools without `session` use the agent's own session (MCP server)
 - `bridge.json` – port + token, rewritten on every bridge start, deleted on `/stop`
 - `bridge.log` – JSONL audit of all write actions and errors
 

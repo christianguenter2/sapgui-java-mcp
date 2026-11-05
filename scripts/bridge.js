@@ -19,6 +19,8 @@
 //   /tree     {session?, id, maxNodes?}   tree nodes (key, parent, text, folder, expanded)
 //   /table    {session?, id, firstRow?, maxRows?, columns?, skipEmpty?}   dynpro table control rows
 //             (scrolls the table for rows outside the visible page)
+//   /session_open  {session?}             open a new session (createSession) next to the given one; returns its id
+//   /session_close {session}              close a session the bridge opened (user sessions are refused)
 //   /reload                               re-load this bridge file (path from __FILE__ or config bridgeScript)
 //   /stop                                 stop the bridge
 // Action endpoints return the resulting screen summary unless {"returnScreen": false}.
@@ -34,7 +36,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.5.0";
+  var BRIDGE_VERSION = "0.6.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -52,6 +54,7 @@
   var KEY = "sapgui-java-mcp.bridge";
   var KEY_LOADER = "sapgui-java-mcp.loader";       // GUI class loader, survives /reload
   var KEY_RELOADING = "sapgui-java-mcp.reloading"; // set while /reload runs → no start dialog
+  var KEY_AGENT = "sapgui-java-mcp.agentSessions";  // ids of sessions the bridge opened (survives /reload)
   // path of this script (Nashorn __FILE__), needed for /reload; config.json "bridgeScript" overrides
   var SELF = (typeof __FILE__ !== "undefined" && /\.js$/.test(String(__FILE__))) ? String(__FILE__) : null;
   var home = System.getProperty("user.home");
@@ -447,6 +450,52 @@
     return { title: str(tryCall(function () { return win.getText(); }, "")), texts: texts, buttons: buttons };
   }
 
+  // ------------------------------------------------------- agent sessions
+  function agentSet() {
+    var set = System.getProperties().get(KEY_AGENT);
+    if (set === null) { set = new (Java.type("java.util.concurrent.ConcurrentSkipListSet"))(); System.getProperties().put(KEY_AGENT, set); }
+    return set;
+  }
+  function allSessionIds() {
+    var ids = [];
+    var cons = toList(getApp().getConnections());
+    for (var c = 0; c < cons.length; c++) {
+      var sess = toList(tryCall(function () { return cons[c].getSessions(); }, null));
+      for (var s2 = 0; s2 < sess.length; s2++) if (typeof sess[s2] !== "string") ids.push(str(sess[s2].getId()));
+    }
+    return ids;
+  }
+
+  // open a new session in the connection of the base session (default con[0]/ses[0])
+  function opSessionOpen(body) {
+    var base = getSession(body);
+    var before = allSessionIds();
+    base.createSession();
+    var Thread = Java.type("java.lang.Thread");
+    for (var w = 0; w < 50; w++) {          // up to ~5 s
+      Thread.sleep(100);
+      var now = allSessionIds();
+      for (var i = 0; i < now.length; i++) {
+        if (before.indexOf(now[i]) >= 0) continue;
+        agentSet().add(now[i]);
+        var ses = getApp().findById(now[i]);
+        return { ok: true, session: now[i].replace(/^\/app\//, ""), id: now[i], info: sessionInfo(ses) };
+      }
+    }
+    fail(409, "no new session appeared within 5 s – session limit reached (rdisp/max_alt_modes, usually 6)?");
+  }
+
+  // close a session – only one the bridge opened itself, never a user session
+  function opSessionClose(body) {
+    var ses = getSession(body);
+    var id = str(ses.getId());
+    if (!agentSet().contains(id)) fail(403, "refusing to close " + id + ": not a session opened by the agent (user session)");
+    var con = ses.getParent();
+    con.closeSession(id);
+    agentSet().remove(id);
+    return { ok: true, closed: id.replace(/^\/app\//, "") };
+  }
+
   // ----------------------------------------------------------- operations
   function opStatus() {
     var app = getApp();
@@ -469,7 +518,9 @@
         var sess = toList(tryCall(function () { return con.getSessions(); }, null));
         for (var s = 0; s < sess.length; s++) {
           if (typeof sess[s] === "string") { cd.sessions.push({ error: sess[s] }); continue; }
-          cd.sessions.push(tryCall(function () { return sessionInfo(sess[s]); }, { error: "session not readable" }));
+          var si = tryCall(function () { return sessionInfo(sess[s]); }, { error: "session not readable" });
+          if (si.id && agentSet().contains(si.id)) si.agent = true;
+          cd.sessions.push(si);
         }
       }
       res.connections.push(cd);
@@ -917,7 +968,7 @@
   var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
   server.setExecutor(Executors.newSingleThreadExecutor());
 
-  var WRITE_OPS = { "/set": 1, "/press": 1, "/vkey": 1, "/tcode": 1, "/command": 1 };
+  var WRITE_OPS = { "/set": 1, "/press": 1, "/vkey": 1, "/tcode": 1, "/command": 1, "/session_open": 1, "/session_close": 1 };
 
   function respond(ex, code, obj) {
     var bytes = new JString(JSON.stringify(obj)).getBytes("UTF-8");
@@ -991,6 +1042,8 @@
             case "/grid": res = opGrid(ses, body); break;
             case "/tree": res = opTree(ses, body); break;
             case "/table": res = opTable(ses, body); break;
+            case "/session_open": res = opSessionOpen(body); break;
+            case "/session_close": res = opSessionClose(body); break;
             default: fail(404, "unknown endpoint " + path);
           }
         }

@@ -204,3 +204,23 @@ program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
   The orphaned TADIR `R3TR FUGR /XYZ/CFG_PARAM_M` stays (RSWBO052 cannot delete entries; SAP: TK/233
   "object does not exist"); it is in <request>, so the import deletes it in the target as well.
 - The write gate caught the menu entry "Delete" too (it reads the element text for every press).
+
+## 12. Agent session and bridge auto-start – 2026-11-05
+
+**Own session.** User and agent shared `ses[0]`; the user navigating in it broke the agent's flow
+three times (ZPOST, SE54 ×2 – the screen guard caught each). Now:
+- bridge `/session_open` (`GuiSessionWrapper.createSession()`, waits ≤ 5 s for the new id) and
+  `/session_close` (`GuiConnectionWrapper.closeSession(id)`) – closing is refused (403) for sessions
+  the bridge did not open; their ids live in a JVM system property (survives `/reload`); `/status`
+  marks them `agent: true`.
+- MCP `session.ts`: with `ownSession` (default true) every session endpoint without an explicit
+  `session` goes to the agent session – opened on first use, re-checked every 10 s, reopened when
+  closed, adopted from the bridge after an MCP restart. Screen headers show the session (`ses[2]`).
+- Tested: user session untouched while the agent ran SE16H in `ses[2]`; closing `ses[0]` refused;
+  agent session closed behind the MCP's back → next call opened a new one.
+
+**Auto-start (planned).** No script auto-start setting exists (interpreter knows only `scriptsDir`
+and the hooks `onSessionCreate`/`onSessionDelete` of a running script). But `bin/sapgui` → `guilogon`
+runs `exec "${PLATIN_JAVA}" ${JRE_ARGS} …` with `PLATIN_JAVA` taken from the environment → a wrapper
+can add `-javaagent:`; the agent waits for `GuiApplication.currentApplication()` and evaluates
+`bridge.js` in Nashorn (same path as `/reload`).
