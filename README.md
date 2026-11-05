@@ -282,11 +282,14 @@ cd mcp && npm run test:live -- --system DEV/100 [--abap-program ZMY_PROGRAM]
 
 It drives the MCP server like an agent in its own session, with standard objects only and without
 saving anything: version check, Easy Access tree + context menu + write gate on "Delete All
-Favorites", screen guard and Save gate, table display (SE16H or S416H, T000) as ALV grid + context
-menu, ABAP editor in display mode (RSPARAM: read, write refused), TextEdit (`SAPTEXTEDIT_DEMO_1`),
-an agent session ended by SAP (`/i`), screenshot. `--abap-program` (a program of your own, e.g. in
-`$TMP`) adds the change-mode test: a line is inserted, Check must report it, the editor is left with
-"No". Prints PASS/FAIL per step and the call log on failure; exit code 1 on any failure.
+Favorites", screen guard and Save gate, table display (SE16H or S416H, T000): text field, checkbox
+and selection table control, then the ALV grid + context menu; ABAP editor in display mode (RSPARAM:
+read, write refused; Shift+F2 = Delete gated), TextEdit (`SAPTEXTEDIT_DEMO_1`), classic list
+(`SHOWCOLO`), radio buttons (SE38), user formats (SU3), SE80 (object type and name controls, toolbar
+buttons and menus), an agent session ended by SAP (`/i`), screenshot. `--abap-program` (a program of
+your own, e.g. in `$TMP`) adds the change-mode test: a line is inserted, Check must report it, the
+editor is left with "No".
+Prints PASS/FAIL per step and the call log on failure; exit code 1 on any failure.
 
 ## Status
 

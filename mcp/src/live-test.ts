@@ -113,7 +113,20 @@ step("table display: ALV grid, context menu", async () => {
     s = undefined;
   }
   check(s, "neither SE16H nor S416H available");
-  ok(await tool("sap_set_fields", { fields: [{ id: "wnd[0]/usr/ctxtGD-TAB", value: "T000" }], then: "F8", view: "status" }), "T000 + F8");
+  // dynpro fields + table control: T000 + Enter fills the selection criteria table
+  const e = await tool("sap_set_fields", { fields: [{ id: "wnd[0]/usr/ctxtGD-TAB", value: "T000" }], then: "Enter", view: "compact" });
+  ok(e, "T000 + Enter");
+  const tc = /^\s+(tbl\S+) .*TableControl/m.exec(e.text)?.[1];
+  check(tc, "no selection table control", e);
+  const tbl = await tool("sap_read_table", { id: `wnd[0]/usr/${tc}`, maxRows: 5 });
+  ok(tbl, "sap_read_table");
+  check(/^0\t0\t\S*\t.*\tMANDT$/m.test(tbl.text) && /data rows/.test(tbl.text), "selection table without the MANDT row", tbl);
+  const f = await tool("sap_set_fields", { fields: [
+    { id: "wnd[0]/usr/chkGD-NO_TXT", value: true }, { id: "wnd[0]/usr/chkGD-NO_TXT", value: false },
+    { id: "wnd[0]/usr/txtGD-MAX_LINES", value: "50" }] });
+  ok(f, "checkbox + text field");
+  check(/chkGD-NO_TXT \(CheckBox\) = true\n.*chkGD-NO_TXT \(CheckBox\) = false\n.*txtGD-MAX_LINES \(TextField\) = "50"/.test(f.text), "checkbox/text field values", f);
+  ok(await tool("sap_send_key", { key: "F8", view: "status" }), "F8");
   const grid = await findControl("SapGridWrapper");
   const g = await tool("sap_read_grid", { id: grid, maxRows: 5 });
   ok(g, "sap_read_grid");
@@ -191,6 +204,35 @@ step("text editor (SAPTEXTEDIT_DEMO_1): replace, insert, read, range check", asy
   check(/1\| line one\n2\| inserted – äöü\n3\| LINE THREE/.test(t.text) && /modified/.test(t.text), "unexpected text", t);
   refused(await tool("sap_set_text", { id: ed, fromLine: 9, text: "x", view: "status" }), /fromLine\/toLine must lie in 1\.\.3/, "line out of range");
   ok(await tool("sap_send_key", { key: "Back", view: "status" }), "Back");
+});
+
+step("classic list (SHOWCOLO): lines, columns, editable cells", async () => {
+  ok(await tool("sap_start_transaction", { tcode: "SE38", view: "status" }), "SE38");
+  ok(await tool("sap_set_fields", { fields: [{ id: "wnd[0]/usr/ctxtRS38M-PROGRAMM", value: "SHOWCOLO" }], then: "F8", view: "status" }), "run SHOWCOLO");
+  const l = await tool("sap_read_list", { maxLines: 50 });
+  ok(l, "sap_read_list");
+  const colors = ["COL_BACKGROUND", "COL_HEADING", "COL_NORMAL", "COL_TOTAL", "COL_KEY", "COL_POSITIVE", "COL_NEGATIVE", "COL_GROUP"];
+  const missing = colors.filter(c => !new RegExp(`\\t${c}\\t`).test(l.text));
+  check(missing.length === 0, `list lines missing: ${missing.join(", ")}`, l);
+  check(/^line\t@\d+/m.test(l.text) && /\t=0123456\b/.test(l.text), "no column header / editable cells", l);
+  ok(await tool("sap_send_key", { key: "Back", view: "status" }), "Back");
+});
+
+step("radio buttons (SE38 subobjects)", async () => {
+  ok(await tool("sap_start_transaction", { tcode: "SE38", view: "status" }), "SE38");
+  const r = await tool("sap_set_fields", { fields: [{ id: "wnd[0]/usr/radRS38M-FUNC_TEXT", value: true }] });
+  check(/radRS38M-FUNC_TEXT \(RadioButton\) = true/.test(r.text), "radio not selected", r);
+  const sc = await tool("sap_screen", { view: "compact" });
+  check(/radRS38M-FUNC_TEXT \[x\]/.test(sc.text) && /radRS38M-FUNC_EDIT \[ \]/.test(sc.text), "screen does not show the selection", sc);
+  // back to "Source Code" – SE38 remembers the subobject for the user
+  ok(await tool("sap_set_fields", { fields: [{ id: "wnd[0]/usr/radRS38M-FUNC_EDIT", value: true }] }), "back to Source Code");
+});
+
+step("user formats (SU3, separate session)", async () => {
+  const u = await tool("sap_user_formats");
+  ok(u, "sap_user_formats");
+  check(/: date \S+, numbers \S+, time /.test(u.text) && /raw USR01 keys: DATFM=/.test(u.text), "formats not read", u);
+  return u.text.split("\n")[0].replace(/^\S+: /, "");
 });
 
 step("SE80: combo box + input field controls, toolbar control buttons and menus", async () => {

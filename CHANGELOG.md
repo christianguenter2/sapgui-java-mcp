@@ -3,6 +3,13 @@
 All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP server
 (`mcp/package.json`) and this file in lockstep; CI checks that they match.
 
+## [Unreleased]
+
+### Added
+- Live test covers more tools: dynpro text field, checkbox and table control (`sap_read_table`) in
+  the table display, classic list (`sap_read_list`, `SHOWCOLO`), radio buttons, `sap_user_formats` –
+  13 steps.
+
 ## [0.14.0] – 2026-11-05
 
 ### Added
