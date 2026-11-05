@@ -219,8 +219,17 @@ three times (ZPOST, SE54 ×2 – the screen guard caught each). Now:
 - Tested: user session untouched while the agent ran SE16H in `ses[2]`; closing `ses[0]` refused;
   agent session closed behind the MCP's back → next call opened a new one.
 
-**Auto-start (planned).** No script auto-start setting exists (interpreter knows only `scriptsDir`
+**Auto-start (built).** No script auto-start setting exists (interpreter knows only `scriptsDir`
 and the hooks `onSessionCreate`/`onSessionDelete` of a running script). But `bin/sapgui` → `guilogon`
 runs `exec "${PLATIN_JAVA}" ${JRE_ARGS} …` with `PLATIN_JAVA` taken from the environment → a wrapper
 can add `-javaagent:`; the agent waits for `GuiApplication.currentApplication()` and evaluates
 `bridge.js` in Nashorn (same path as `/reload`).
+
+Built 2026-11-05: `agent/BridgeAgent.java` (premain + agentmain + attach `main`). Pitfalls: SAP GUI
+classes come from SAP's own class loader – found via `Instrumentation.getAllLoadedClasses()`; the
+interpreter's `init()` does `new ScriptEngineManager()`, which searches the **thread context class
+loader** – without setting it to the GUI loader `mScriptEngine` stays null. `guilogon` probes
+`$PLATIN_JAVA -jar GuiStartS.jar getopts` and parses stdout → the wrapper passes `getopts` through
+without the agent, and the agent never writes to stdout. Verified by attaching to the running GUI
+(bridge event `autostart`, screen access in the agent session, `/reload` via the path the agent
+passes in `sapgui-java-mcp.script`). Launcher: `scripts/install-autostart.sh`.

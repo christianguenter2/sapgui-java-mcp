@@ -57,6 +57,8 @@
   var KEY_AGENT = "sapgui-java-mcp.agentSessions";  // ids of sessions the bridge opened (survives /reload)
   // path of this script (Nashorn __FILE__), needed for /reload; config.json "bridgeScript" overrides
   var SELF = (typeof __FILE__ !== "undefined" && /\.js$/.test(String(__FILE__))) ? String(__FILE__) : null;
+  // started by agent/BridgeAgent (auto-start): the agent passes the path
+  if (SELF === null && System.getProperty("sapgui-java-mcp.script") !== null) SELF = String(System.getProperty("sapgui-java-mcp.script"));
   var home = System.getProperty("user.home");
   var dir = Paths.get(home, ".sapgui-java-mcp");
   var infoFile = dir.resolve("bridge.json");
@@ -1077,8 +1079,10 @@
   }, null, 2) + "\n");
   chmod600(infoFile);
   var reloaded = System.getProperty(KEY_RELOADING) !== null;
-  audit({ event: reloaded ? "reload" : "start", port: port, version: BRIDGE_VERSION, script: SELF });
-  if (reloaded) return;
+  var autostart = System.getProperty("sapgui-java-mcp.autostart") !== null;
+  if (autostart) System.clearProperty("sapgui-java-mcp.autostart");
+  audit({ event: reloaded ? "reload" : (autostart ? "autostart" : "start"), port: port, version: BRIDGE_VERSION, script: SELF });
+  if (reloaded || autostart) return;
 
   var msg = "sapgui-java-mcp bridge " + BRIDGE_VERSION + " listening on 127.0.0.1:" + port + "\n" + infoFile;
   try {

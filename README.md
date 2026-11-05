@@ -29,6 +29,22 @@ Design and findings: [docs/mcp-outline.md](docs/mcp-outline.md).
 {"bridgeScript": "/home/<user>/Projects/GIT/sapgui-java-mcp/scripts/bridge.js"}
 ```
 
+### Auto-start (no Scripting menu)
+
+```
+scripts/install-autostart.sh      # builds agent/bridge-agent.jar, adds launcher "SAP GUI (MCP bridge)"
+```
+
+The launcher starts `guilogon` with `PLATIN_JAVA=scripts/sapgui-java-with-bridge`, which adds
+`-javaagent:agent/bridge-agent.jar=scripts/bridge.js` to SAP GUI's JVM. The agent waits for
+`GuiApplication`, then runs `bridge.js` through the GUI's own script interpreter (as the Scripting
+menu does) – before logon already; sessions are looked up per request. No start dialog; log in
+`~/.sapgui-java-mcp/agent.log`. Into an already running GUI:
+`~/SAPClients/SAPGUI8.10rev14/jre/bin/java -jar agent/bridge-agent.jar <pid> scripts/bridge.js`
+(the JVM keeps the first loaded agent class, so a second attach runs the old agent code).
+The original launcher is unchanged; remove the new one with
+`rm ~/.local/share/applications/sapgui-mcp-bridge.desktop`.
+
 ## Step 2 – MCP server
 
 ```
