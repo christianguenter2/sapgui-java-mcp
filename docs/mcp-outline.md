@@ -440,3 +440,15 @@ Verified (A4H/001, SE80): Program + RSPARAM submitted → object list shows RSPA
 listed (`WB_BOOKMARK_CREATE`, `WB_BOOKMARKS_EDIT`) and Edit… opened its pop-up; unknown button,
 unknown menu entry and an unknown combo key refused with the valid ids; `WB_DELETE` refused by the gate.
 
+## 23. ABAP debugger – not scriptable – 2026-11-05
+
+Spike (discarded): `/h` + F8 on a report in the agent session. The action that starts the debugger
+does not return until the program ends – the bridge's `/vkey` call blocked 178 s, until the user
+pressed Continue in the debugger window. With the key sent from a separate thread the bridge itself
+stays free, but **every further scripting call of that SAP GUI process blocks** – the agent session,
+the debugger session and the user's sessions alike: SAP GUI serializes scripting calls, and the
+pending one holds them until the debuggee runs on. So the debugger cannot be read or driven through
+the scripting API. Driving its Swing controls directly would be the only way around – rejected as too
+fragile. Debugging belongs to ADT (the debugger REST API). Do not send `/h` through this MCP: it
+freezes scripting for the whole SAP GUI process until someone continues the debugger by hand.
+

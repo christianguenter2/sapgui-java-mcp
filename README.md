@@ -23,6 +23,28 @@ learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md). Cha
 > can change with any SAP GUI release; tested with SAP GUI for Java 8.10 on Linux. Check SAP's license
 > terms for your use. This project is not affiliated with or endorsed by SAP.
 
+## Why not Web GUI in a browser?
+
+An agent could also drive SAP GUI for HTML (Web GUI) with a browser automation tool. The
+comparison below is from building this project, not from a head-to-head benchmark.
+
+| | sapgui-java-mcp | Web GUI + browser automation |
+|---|---|---|
+| What the agent sees | Elements with id, type, value, read-only flag; ALV grids, trees, table controls, lists and editors as rows and lines | Generated HTML (cryptic element ids, lazily rendered grids) or screenshots, to be interpreted |
+| Tokens | Compact screen views (about −70 % / −90 % on large entry screens), `sap_read_list` −96 % on an SE16 page | Pages are much larger than the information on them |
+| Safety | SAP-aware: write gate (save/post/delete buttons, keys, menus, pop-up questions), screen guard, own agent session, `allowedSystems`, audit log | Whatever the browser tool offers – nothing SAP-specific |
+| Timing | A scripting call returns when the server has answered | The agent has to wait for and detect page reloads |
+| Prerequisites on the SAP system | Scripting enabled (`sapgui/user_scripting`); normal desktop logon incl. SSO | The Web GUI ICF service must be active (often off on development systems); some transactions and controls are not supported in Web GUI |
+| Prerequisites on the client | SAP GUI for Java, this bridge, Node.js | Just a browser – any operating system |
+| Stability | Relies partly on undocumented SAP GUI internals (see above) – a SAP GUI update can break parts; `npm run test:live` catches that | Public web technology, but Web GUI's HTML is not a stable interface either |
+| Fiori apps | Not covered | Same browser, same tool |
+| ABAP debugger | Not possible – the scripting API blocks while the debugger holds the session ([docs/mcp-outline.md §23](docs/mcp-outline.md)) | Not tested |
+
+In short: for classic transactions – development, customizing, reading tables and lists – this MCP
+gives the agent structured data with SAP-aware safety rails at a fraction of the tokens. Web GUI in a
+browser is the fallback where SAP GUI for Java is not installed, and the way to reach Fiori apps.
+For debugging, use ADT (the ABAP Development Tools' REST API) rather than either GUI.
+
 ## Requirements
 
 - SAP GUI for Java (tested: 8.10, Linux) – found automatically via `scripts/sapgui-home`
@@ -268,7 +290,7 @@ an agent session ended by SAP (`/i`), screenshot. `--abap-program` (a program of
 ## Status
 
 Experimental, in use against development and trial systems since 2026-11-04. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§22.
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§23.
 
 ## License
 
