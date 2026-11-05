@@ -91,8 +91,10 @@ name the current screen (`element not found: … | session is on …`).
 
 Save/Post – vkey 11 (Ctrl+S), `tbar[0]/btn[11]`, buttons whose text or tooltip starts with
 Save/Post/Buchen/Sichern/Speichern, OK-codes `=BU`, `=SAVE`, `/11` … (also typed into the OK-code
-field followed by Enter) – are refused with HTTP 428 unless the request has `confirm: true` **and**
-`expect`. Every write is logged in `bridge.log` (`writeAction`). Disable with `"confirmWrites": false`.
+field followed by Enter) – and actions that commit at once – buttons Close/Release/Reverse/Delete
+(+ German), Yes or Enter in a pop-up whose question is about saving, posting, closing, deleting,
+reversing, releasing or creating – are refused with HTTP 428 unless the request has `confirm: true`
+**and** `expect`. "No" to "Save changes?" and "Continue" stay free. Every write is logged in `bridge.log` (`writeAction`). Disable with `"confirmWrites": false`.
 
 ```
 write gate: press wnd[0]/tbar[0]/btn[11] "Save" saves data – nothing was done. Ask the user,

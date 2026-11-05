@@ -34,7 +34,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.4.0";
+  var BRIDGE_VERSION = "0.5.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -195,12 +195,32 @@
   // Write gate: actions that save/post data. Returns a label ("press btn[11] \"Post\"") or null.
   var SAVE_WORDS = /^\s*(save|post|buchen|sichern|speichern|enregistrer|comptabiliser)\b/i;
   var SAVE_CODES = /^(=|\/)?(BU|SAVE|SICH|SPEI|POST|UPDA|\/11|11)$/i;
+  // buttons that commit immediately (ZCLOSE "Close" closed a posting key without any save step);
+  // "Cancel" (F12) is navigation and deliberately not in the list
+  var COMMIT_WORDS = /^\s*(close|release|reverse|delete|freigeben|l(ö|oe)schen|stornieren|schlie(ss|ß)en|abschlie(ss|ß)en)\b/i;
+  // question of a confirmation pop-up that leads to a write when answered with Yes
+  var COMMIT_QUESTION = /\b(save|post|close|delete|reverse|release|create|cancel the|speichern|sichern|buchen|schlie(ss|ß)en|l(ö|oe)schen|stornieren|freigeben|anlegen|erstellen)\b/i;
+  var YES_BUTTON = /(SPOP-OPTION1|BUTTON_1|BUTTON_YES)$/;
+
+  // texts of the active modal window, or null when wnd[0] is active
+  function popupTexts(ses) {
+    var act = tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+    if (act === "wnd[0]") return null;
+    var res = screen(ses, { maxNodes: 200 });
+    var p = res.popup || { title: "", texts: [] };
+    return { window: act, title: p.title, text: (p.title + "\n" + p.texts.join("\n")).replace(/\s+/g, " ").trim() };
+  }
+
   function writeIntent(ses, path, body) {
     if (path === "/vkey") {
       if (Number(body.vkey) === 11) return "vkey 11 (Ctrl+S)";
       if (Number(body.vkey) === 0) {   // Enter with a save code typed into the OK-code field
         var ok = str(tryCall(function () { return ses.findById("wnd[0]/tbar[0]/okcd").getText(); }, "")).trim();
         if (ok !== "" && SAVE_CODES.test(ok)) return "Enter with OK-code " + ok;
+        // Enter on a confirmation pop-up triggers its default answer (usually Yes)
+        var pt = popupTexts(ses);
+        if (pt !== null && (!body.window || body.window === pt.window) && COMMIT_QUESTION.test(pt.text))
+          return "Enter on pop-up " + JSON.stringify(pt.text.substring(0, 120));
       }
     }
     if (path === "/command" && SAVE_CODES.test(str(body.command).trim())) return "OK-code " + str(body.command).trim();
@@ -210,8 +230,15 @@
       var id = relId(el.getId());
       var txt = str(tryCall(function () { return el.getText(); }, "")).trim();
       var tip = str(tryCall(function () { return el.getTooltip(); }, "")).trim();
-      if (/\/tbar\[0\]\/btn\[11\]$/.test(id) || SAVE_WORDS.test(txt) || SAVE_WORDS.test(tip))
+      if (/\/tbar\[0\]\/btn\[11\]$/.test(id) || SAVE_WORDS.test(txt) || SAVE_WORDS.test(tip) ||
+          COMMIT_WORDS.test(txt) || COMMIT_WORDS.test(tip))
         return "press " + id + " " + JSON.stringify(txt || tip);
+      // Yes in a confirmation pop-up whose question leads to a write ("close the posting key?")
+      if (/^wnd\[[1-9]\]\//.test(id) && (YES_BUTTON.test(id) || /^\s*(yes|ja|oui)\s*$/i.test(txt))) {
+        var q = popupTexts(ses);
+        if (q !== null && COMMIT_QUESTION.test(q.text))
+          return "answer " + JSON.stringify(txt || tip) + " to pop-up " + JSON.stringify(q.text.substring(0, 120));
+      }
     }
     return null;
   }

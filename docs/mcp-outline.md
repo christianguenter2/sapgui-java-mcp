@@ -167,5 +167,19 @@ button text at press time: vkey 11, `tbar[0]/btn[11]`, buttons/tooltips starting
 Save/Post/Buchen/Sichern/Speichern/Enregistrer/Comptabiliser, OK-codes `=BU =SAVE =SICH =SPEI =POST
 =UPDA /11` via `/command` or typed into `okcd` + Enter. Without `confirm` → 428; `confirm` without
 `expect` → 428. Config `confirmWrites: false` turns it off. Tested on SE16H (all five variants refused,
-Enter unaffected). Known gaps: function codes behind menu entries and context menus, F-keys other
-than F11 that a program maps to saving, ALV toolbar buttons (`pressToolbarButton`) – not covered.
+Enter unaffected).
+
+**Extension (bridge 0.5.0, 2026-11-05).** ZCLOSE showed that not every write is called Save: "Close"
+plus Yes in an SPO1 pop-up closed posting key <recon-key> at once, without the gate noticing.
+Now also gated:
+- buttons whose text/tooltip starts with Close/Release/Reverse/Delete/Freigeben/Löschen/Stornieren/
+  Schliessen/Abschliessen ("Cancel" = F12 is navigation and stays free);
+- **Yes in a confirmation pop-up** (`SPOP-OPTION1`, `BUTTON_1`, text Yes/Ja/Oui) and **Enter on it**
+  (triggers the default answer), when the pop-up's question matches save/post/close/delete/reverse/
+  release/create (+ German). Content-based on purpose: "No" to "Save changes?" (= discard) and
+  "Continue" on information pop-ups stay free; information texts ("…created", "…posted") do not match
+  because of the word boundaries.
+Tested without committing anything: ZPOST "create the key?" Yes/Enter refused, Cancel free; /XYZ/CFG
+Delete refused, "Save changes?" Yes refused, No free (DB: no key, no parameter created).
+Still not covered: function codes behind menu entries and context menus, F-keys other than F11 that a
+program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
