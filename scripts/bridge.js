@@ -765,24 +765,146 @@
     };
   }
 
+  // Trees: type 0 = simple, 1 = list tree, 2 = column tree. In list and column trees the visible
+  // texts live in items (getItemText(key, column)); getNodeTextByKey() is often empty there
+  // (SE03 tool tree: only the report names came back as keys).
+  // call a (possibly non-public) zero-arg method by name via reflection; undefined if absent
+  function callHidden(obj, name) {
+    var cls = obj.getClass();
+    while (cls !== null) {
+      try { var m = cls.getDeclaredMethod(name); m.setAccessible(true); return m.invoke(obj); }
+      catch (e) { cls = cls.getSuperclass(); }
+    }
+    return undefined;
+  }
+  // Texts of a tree node straight from the model: SapTree.getNodeTextByKey() only reads TreeString
+  // entries, so nodes whose text is a link (SE03 tool tree: double-click starts a report) come back
+  // empty. Collect every string-like value of getNode(key).getEntry().getObjects() instead.
+  function nodeModelTexts(bean, key) {
+    var out = [];
+    function collect(o, depth) {
+      if (o === null || o === undefined || depth > 4 || out.length > 10) return;
+      if (typeof o === "string") { if (o.trim() !== "") out.push(o.trim()); return; }
+      if (Java.isJavaObject(o) && o.getClass().isArray()) { var arr = Java.from(o); for (var a = 0; a < arr.length; a++) collect(arr[a], depth + 1); return; }
+      if (Java.isJavaObject(o)) {
+        var cn = str(o.getClass().getName());
+        if (cn === "java.lang.String") { var sv = str(o).trim(); if (sv !== "") out.push(sv); return; }
+        var v = tryCall(function () { return callHidden(o, "getString"); }, undefined);
+        if (v === undefined || v === null) v = tryCall(function () { return callHidden(o, "getText"); }, undefined);
+        if (v !== undefined && v !== null) { var t2 = str(v).trim(); if (t2 !== "") out.push(t2); }
+      }
+    }
+    var node = tryCall(function () { return bean.getNode(key); }, null);
+    if (node === null) return out;
+    var entry = tryCall(function () { return node.getEntry(); }, null);
+    if (entry === null) return out;
+    collect(tryCall(function () { return entry.getObjects(); }, null), 0);
+    return out;
+  }
+
   function opTree(ses, body) {
     var t = findEl(ses, body.id);
     if (str(t.getClass().getSimpleName()) !== "SapTreeWrapper") fail(400, "not a tree: " + relId(t.getId()) + " (" + t.getClass().getSimpleName() + ")");
     var max = body.maxNodes ? Math.min(Number(body.maxNodes), 2000) : 300;
+    var treeType = Number(tryCall(function () { return t.getTreeType(); }, 0));
+    var colNames = treeType === 2 ? toList(tryCall(function () { return t.getColumnNames(); }, null)).map(function (x) { return str(x); }) : [];
+    var columns = colNames.map(function (cn) {
+      return { name: cn, title: str(tryCall(function () { return t.getColumnTitleFromName(cn); }, "")) };
+    });
     var keys = toList(t.getNodesCol());
+    // SapTree bean (for texts the scripting API does not return): wrapper → GuiShell → mJavaObject
+    var bean = scriptObject(t);
+    if (bean !== null) { var jo = tryCall(function () { return privateField(bean, "mJavaObject"); }, null); if (jo !== null) bean = jo; }
     var nodes = [];
     for (var i = 0; i < keys.length && i < max; i++) {
       var k = str(keys[i]);
-      nodes.push({
+      var n = {
         key: k,
         parent: str(tryCall(function () { return t.getParent(k); }, "")),
         text: str(tryCall(function () { return t.getNodeTextByKey(k); }, "")),
         folder: !!tryCall(function () { return t.isFolder(k); }, false),
-        expanded: !!tryCall(function () { return t.isFolderExpanded(k); }, false)
-      });
+        expanded: !!tryCall(function () { return t.isFolderExpanded(k); }, false),
+        level: tryCall(function () { return Number(t.getHierarchyLevel(k)); }, undefined)
+      };
+      var items = null;
+      if (treeType === 2) {
+        items = {};
+        for (var c = 0; c < colNames.length; c++) {
+          var cn = colNames[c];
+          var it = str(tryCall(function () { return t.getItemText(k, cn); }, ""));
+          if (it !== "") items[cn] = it;
+        }
+      } else if (treeType === 1) {
+        items = {};
+        var cnt = Number(tryCall(function () { return t.getListTreeNodeItemCount(k); }, 0));
+        for (var li = 1; li <= cnt && li <= 20; li++) {
+          var lt = str(tryCall(function () { return t.getItemText(k, String(li)); }, ""));
+          if (lt !== "") items[String(li)] = lt;
+        }
+      }
+      if (items !== null) {
+        n.items = items;
+        if (n.text === "") for (var ik in items) { n.text = items[ik]; break; }  // first item = hierarchy text
+      }
+      // still no text (SE03 tool tree reports type 0 but has no node text): probe the alternatives
+      if (n.text === "" && (body.debug || i < 400)) {
+        var probes = {};
+        var anyCols = colNames.length ? colNames : toList(tryCall(function () { return t.getColumnNames(); }, null)).map(function (x) { return str(x); });
+        for (var pc = 0; pc < anyCols.length && pc < 10; pc++) {
+          var pcn = anyCols[pc];
+          var pv = str(tryCall(function () { return t.getItemText(k, pcn); }, ""));
+          if (pv !== "") probes["col:" + pcn] = pv;
+        }
+        for (var pi = 1; pi <= 5; pi++) {
+          var pvi = str(tryCall(function () { return t.getItemText(k, String(pi)); }, ""));
+          if (pvi !== "") probes["item:" + pi] = pvi;
+        }
+        var tip = str(tryCall(function () { return t.getItemToolTip(k, ""); }, ""));
+        if (tip !== "") probes.tooltip = tip;
+        var hdr = str(tryCall(function () { return t.getNodeItemHeaders(k); }, ""));
+        if (hdr !== "") probes.itemHeaders = hdr;
+        var path = str(tryCall(function () { return t.getNodeTextByPath(k); }, ""));
+        if (path !== "") probes.byPath = path;
+        if (body.debug) {
+          n.dbg = tryCall(function () {
+            var d = { bean: bean === null ? null : str(bean.getClass().getName()) };
+            var nd = null;
+            try { nd = bean.getNode(k); d.node = nd === null ? null : str(nd.getClass().getName()); } catch (e1) { d.nodeErr = errText(e1); }
+            if (nd !== null) {
+              try {
+                var en = nd.getEntry(); d.entry = en === null ? null : str(en.getClass().getName());
+                var objs = en.getObjects(); d.objs = [];
+                var oa = Java.from(objs);
+                for (var q = 0; q < oa.length && q < 8; q++) {
+                  var o = oa[q];
+                  if (o === null) { d.objs.push(null); continue; }
+                  var oc = str(o.getClass().getName());
+                  if (o.getClass().isArray()) {
+                    var inner = Java.from(o).slice(0, 6).map(function (x) { return x === null ? null : str(x.getClass().getName()) + "=" + str(tryCall(function () { return callHidden(x, "getString") || callHidden(x, "getText") || x; }, "?")).substring(0, 40); });
+                    d.objs.push(oc + inner.join("|"));
+                  } else d.objs.push(oc + "=" + str(tryCall(function () { return callHidden(o, "getString") || callHidden(o, "getText") || o; }, "?")).substring(0, 40));
+                }
+              } catch (e2) { d.entryErr = errText(e2); }
+            }
+            return d;
+          }, { err: "debug failed" });
+        }
+        if (bean !== null) {
+          var mt = nodeModelTexts(bean, k);
+          if (mt.length) { probes.model = mt[0]; if (mt.length > 1) n.modelTexts = mt; }
+        }
+        if (probes.model) n.text = probes.model;
+        for (var pk in probes) { if (n.text === "") n.text = probes[pk]; }
+        if (body.debug) { n.probes = probes; n.probeCols = anyCols; }
+      }
+      nodes.push(n);
     }
-    return { id: relId(t.getId()), total: keys.length, returned: nodes.length, selected: str(tryCall(function () { return t.getSelectedNode(); }, "")), nodes: nodes };
+    return {
+      id: relId(t.getId()), treeType: treeType, columns: columns, total: keys.length, returned: nodes.length,
+      selected: str(tryCall(function () { return t.getSelectedNode(); }, "")), nodes: nodes
+    };
   }
+
 
   // ------------------------------------------------------------ http server
   var prev = System.getProperties().get(KEY);

@@ -188,8 +188,14 @@ program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
 
 - **Classic lists** (`lbl[col,row]`, e.g. RSWBO052 "Change Object Directory Entries"): a line is picked
   by cursor + double-click. `/press` on a `GuiLabel` / text field now does `setFocus()` + F2 on its window.
-- **Column trees** (SE03 tool tree): `sap_read_tree` returns only node keys (here the report names,
-  e.g. RSWBO052); the texts live in item columns, which `getNodeTextByKey` does not return. Open.
+- **Tree texts** (fixed 2026-11-05): the SE03 tool tree is a *simple* tree (type 0), not a column
+  tree – yet `getNodeTextByKey()` returned "" for every node. `SapTree.getNodeTextByKey` picks the
+  entry object by `getID()` as index, which does not match there, although the entry *is* a
+  `TreeString` with the text. `/tree` now reads empty texts straight from the model: wrapper →
+  `mScriptObject` (`GuiShell`) → `mJavaObject` (`SapTree`) → `getNode(key).getEntry().getObjects()`,
+  collecting `getString()`/`getText()` values. List trees (1) and column trees (2) additionally return
+  `getItemText(key, column)` per item/column (`items`; MCP prints one column per tree column).
+  `debug: true` on `/tree` reports bean/node/entry classes per node.
 - **SE54 leftover** `/XYZ/CFG_PARAM`: TVDIR pointed to function group `/XYZ/CFG_PARAM_M`, whose main
   program no longer existed → SE54 offered only Create, menu Change/Delete disabled. Cleaned up via the
   initial screen's "Generated Objects" Delete (`btn*VIMDYNFLDS-PUSH_DELE` – the `*` one; the first

@@ -260,7 +260,8 @@ server.registerTool("sap_reload_bridge", {
 
 server.registerTool("sap_read_tree", {
   title: "Read tree",
-  description: "Read nodes of a tree control (control=SapTreeWrapper): key, parent key, text, folder/expanded flags.",
+  description: "Read nodes of a tree control (control=SapTreeWrapper): key, parent key, text, folder/expanded flags. " +
+    "Simple, list and column trees; for column trees the item text of every column is returned as well.",
   inputSchema: {
     id: z.string().describe("Tree id from sap_screen"),
     maxNodes: z.number().int().min(1).max(2000).optional().describe("Default 300"),
@@ -269,8 +270,20 @@ server.registerTool("sap_read_tree", {
   annotations: { readOnlyHint: true },
 }, async (a) => run(async () => {
   const t = await call("tree", a);
-  const lines = [`tree ${t.id}: ${t.returned} of ${t.total} nodes, selected=${JSON.stringify(t.selected)}`, "key\tparent\tfolder\ttext"];
-  for (const n of t.nodes) lines.push(`${n.key}\t${n.parent}\t${n.folder ? (n.expanded ? "open" : "closed") : ""}\t${n.text}`);
+  const kind = ["simple", "list", "column"][t.treeType] ?? `type ${t.treeType}`;
+  const lines = [`tree ${t.id} (${kind} tree): ${t.returned} of ${t.total} nodes, selected=${JSON.stringify(t.selected)}`];
+  // column trees: one column per tree column (the first one is the hierarchy text = "text")
+  const cols: { name: string; title: string }[] = t.columns ?? [];
+  const extra = cols.slice(1);
+  if (cols.length) lines.push("columns: " + cols.map(c => `${c.name}=${JSON.stringify(c.title)}`).join(", "));
+  lines.push(["key", "parent", "folder", "text", ...extra.map(c => c.name)].join("\t"));
+  const clean = (x: unknown) => String(x ?? "").replace(/[\t\n]/g, " ");
+  for (const n of t.nodes) {
+    const row = [n.key, n.parent, n.folder ? (n.expanded ? "open" : "closed") : "", clean(n.text)];
+    if (extra.length) row.push(...extra.map(c => clean(n.items?.[c.name])));
+    else if (t.treeType === 1 && n.items) row.push(...Object.values(n.items).slice(1).map(clean));
+    lines.push(row.join("\t"));
+  }
   return lines.join("\n");
 }));
 

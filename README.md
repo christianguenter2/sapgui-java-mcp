@@ -57,7 +57,7 @@ screen incl. status bar, so no extra `sap_screen` call is needed. `sap_set_field
 | `sap_send_command` | send an OK-code (`command`, e.g. `/nSE16N`) |
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`); scrolls and waits for lazily loaded rows, warns about rows that stayed empty |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true) |
-| `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300) |
+| `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns; texts the scripting API misses are read from the tree model |
 | `sap_user_formats` | date format, decimal notation, time format of the user (SU3 defaults, read in a separate session that is closed again; cached) |
 | `sap_reload_bridge` | reload `bridge.js` inside SAP GUI and wait until the new bridge answers |
 
