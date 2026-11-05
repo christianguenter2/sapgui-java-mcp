@@ -18,8 +18,15 @@ const TOOLBAR_TYPES = new Set(["GuiToolBar", "GuiToolbar"]);
 const PREFIX = /^(lbl|txt|ctxt|chk|rad|cmb|pwd|btn|okcd|tbl|cntl|sub|tabs|tabp|shell|box)/;
 
 function q(s: string | undefined): string { return s === undefined ? "" : JSON.stringify(s); }
-const lastPart = (id: string) => id.slice(id.lastIndexOf("/") + 1);
-const parentOf = (id: string) => id.slice(0, id.lastIndexOf("/"));
+// Segment separator in SAP GUI ids: a "/" followed by a lowercase type prefix (usr, tbl, txt, wnd[0] …).
+// Names may contain namespace slashes – "tbl/XYZ/SAPLCFG_PARAM_VTCTRL_/XYZ/CFG_PARAM_V" is ONE segment –
+// and those are followed by uppercase DDIC names, so they are not separators.
+function lastSep(id: string): number {
+  for (let i = id.length - 1; i > 0; i--) if (id[i] === "/" && /[a-z]/.test(id[i + 1] ?? "")) return i;
+  return -1;
+}
+export const lastPart = (id: string) => id.slice(lastSep(id) + 1);
+export const parentOf = (id: string) => { const i = lastSep(id); return i < 0 ? "" : id.slice(0, i); };
 const baseName = (id: string) => lastPart(id).replace(PREFIX, "").replace(/\[\d+(,\d+)?\]$/, "");
 
 function header(s: Screen): string[] {
