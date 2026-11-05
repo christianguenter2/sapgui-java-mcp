@@ -7,11 +7,12 @@ import { z } from "zod";
 import { call, callBridge, readConfig, listBridges, statusAll, BridgeError } from "./bridge.js";
 import { formatGrid, formatTable, formatList, Screen, Grid, Table, ListResult } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
+import { parseExpect } from "./expect.js";
 import { userFormats, cachedFormats } from "./formats.js";
 import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
 
 const server = new McpServer(
-  { name: "sapgui-java", version: "0.1.0" },
+  { name: "sapgui-java", version: "0.10.0" },
   {
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
@@ -65,22 +66,6 @@ const expect = z.union([
 const confirm = z.boolean().optional().describe(
   "Write gate: Save/Post (vkey 11, btn[11], Save/Post/Buchen buttons, OK-codes =BU/=SAVE …) are refused unless " +
   "confirm=true AND expect is given. Set it only after the user approved this specific save/post.");
-
-type Expect = { program?: string; screen?: number; window?: string; transaction?: string };
-function parseExpect(x: z.infer<typeof expect>): Expect | undefined {
-  if (x === undefined) return undefined;
-  if (typeof x !== "string") return x;
-  const r: Expect = {};
-  for (const tok of x.trim().split(/\s+/)) {
-    const m = /^([A-Z0-9_\/]+)\/(\d+)$/i.exec(tok);
-    if (m) { r.program = m[1]; r.screen = Number(m[2]); }
-    else if (/^wnd\[\d+\]$/.test(tok)) r.window = tok;
-    else if (tok) r.transaction = tok;
-  }
-  if (r.program === undefined && r.window === undefined && r.transaction === undefined)
-    throw new BridgeError(`cannot parse expect ${JSON.stringify(x)} – use "PROGRAM/DYNPRO", e.g. "SAPLSE16N/120"`);
-  return r;
-}
 
 function withScreen(head: string, r: { screen?: Screen }, v: View | undefined): string {
   return r.screen ? `${head}\n${renderScreen(r.screen, v ?? "changed")}` : head;

@@ -8,7 +8,41 @@ Claude Code ⇄ MCP server (Node, stdio, mcp/) ⇄ HTTP 127.0.0.1 + token ⇄ sc
 
 The agent works in **its own SAP GUI session** next to yours, every Save/Post needs an explicit
 confirmation, and screens come back in a compact, token-saving form. Design notes and everything
-learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md).
+learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md). Changes: [CHANGELOG.md](CHANGELOG.md).
+
+> **Status: experimental (0.10.0).** Use it on **development, test and trial systems only** – never on
+> production. An AI agent drives a logged-on SAP GUI with your user's authorizations. The write gate
+> (`confirm`) is a **heuristic** based on button texts, OK-codes and pop-up questions in English and
+> German; it does not catch every write (context menus, for example), and it is no substitute for
+> authorizations and your own review. You use this software at your own risk (see [LICENSE](LICENSE)).
+
+> **Internals.** SAP GUI's public scripting API leaves gaps (pop-up HTML text, some tree texts, table
+> column titles, script start without dialog). The bridge closes them by reading **undocumented
+> internals** of SAP GUI for Java (private fields and classes found by inspecting the client). They
+> can change with any SAP GUI release; tested with SAP GUI for Java 8.10 on Linux. Check SAP's license
+> terms for your use. This project is not affiliated with or endorsed by SAP.
+
+## Requirements
+
+- SAP GUI for Java (tested: 8.10, Linux) – found automatically via `scripts/sapgui-home`
+  (`$SAPGUI_HOME`, `~/SAPClients/SAPGUI*`, `/opt/SAPClients/SAPGUI*`).
+- Node.js 20+ and Claude Code (or any MCP client).
+- A JDK 17+ to build the bridge agent – the one shipped with SAP GUI is used if present.
+- An ABAP system with scripting allowed (`sapgui/user_scripting`); the
+  [ABAP Cloud Developer Trial](https://hub.docker.com/r/sapse/abap-cloud-developer-trial) works.
+
+## Quick start
+
+```
+git clone https://github.com/christianguenter2/sapgui-java-mcp.git && cd sapgui-java-mcp
+(cd mcp && npm install && npm run build)
+claude mcp add --scope user sapgui-java -- node "$PWD/mcp/dist/index.js"
+mkdir -p ~/.sapgui-java-mcp && echo '{"allowedSystems": ["A4H/001"]}' > ~/.sapgui-java-mcp/config.json
+scripts/install-autostart.sh        # launcher "SAP GUI (MCP bridge)"
+```
+
+Start SAP GUI with **"SAP GUI (MCP bridge)"**, log on (system and client must be in `allowedSystems`),
+then ask Claude e.g. *"show table T000 in SE16"*. Details below.
 
 ## Setup
 
@@ -32,7 +66,7 @@ already before logon; no dialog; log in `~/.sapgui-java-mcp/agent.log`. Your ori
 unchanged; remove the new one with `rm ~/.local/share/applications/sapgui-mcp-bridge.desktop`.
 
 Into an already running GUI (without restart):
-`~/SAPClients/SAPGUI8.10rev14/jre/bin/java -jar agent/bridge-agent.jar <pid> scripts/bridge.js`
+`"$(scripts/sapgui-home)/jre/bin/java" -jar agent/bridge-agent.jar <pid> scripts/bridge.js`
 (a second attach into the same JVM runs the agent class loaded first).
 
 **Manually instead:** run `scripts/bridge.js` from the Scripting menu once per GUI start (dialog
@@ -199,8 +233,24 @@ scripts/sgb reload
 First-time diagnostics: `scripts/sgj-smoke-test.js` from the Scripting menu writes
 `~/sapgui-java-smoke-test.txt` (session info, tree walk, threading, loopback socket).
 
+## Tests
+
+```
+cd mcp && npm test        # build + unit tests (node:test): views, id splitting, expect, list tables,
+                          # session refs, and the write-gate patterns read straight from bridge.js
+```
+
+CI (GitHub Actions) runs the unit tests, syntax checks of the bridge and the shell scripts, compiles
+the bridge agent and checks that bridge, MCP server and changelog carry the same version. Everything
+that talks to SAP GUI is tested manually against real systems.
+
 ## Status
 
-In use against a development system since 2026-11-04. Open: context menus (grid/tree), text edit /
-ABAP editor controls, automated tests and CI. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§14.
+Experimental, in use against development and trial systems since 2026-11-04. Open: context menus
+(grid/tree), text edit / ABAP editor controls, tests against a live SAP GUI. History and findings:
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§17.
+
+## License
+
+[MIT](LICENSE) © 2026 Christian Guenter. SAP, SAP GUI and ABAP are trademarks of SAP SE; this project
+is not affiliated with SAP SE.

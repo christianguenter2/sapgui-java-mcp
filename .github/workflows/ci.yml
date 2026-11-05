@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: MCP server – install, build, unit tests
+        working-directory: mcp
+        run: |
+          npm ci
+          npm test
+
+      - name: Bridge – JavaScript syntax (Nashorn runs ES5; node only checks the syntax)
+        run: node --check scripts/bridge.js && node --check scripts/sgj-smoke-test.js
+
+      - name: Shell scripts – syntax
+        run: |
+          bash -n agent/build.sh scripts/install-autostart.sh scripts/sgb
+          sh -n scripts/sapgui-java-with-bridge scripts/sapgui-home
+
+      - name: Bridge agent – compile
+        run: SAPGUI_JDK="$JAVA_HOME" agent/build.sh
+
+      - name: One version everywhere
+        run: |
+          v=$(node -p "require('./mcp/package.json').version")
+          grep -q "BRIDGE_VERSION = \"$v\"" scripts/bridge.js || { echo "bridge.js version differs from $v"; exit 1; }
+          grep -q "version: \"$v\"" mcp/src/index.ts || { echo "index.ts version differs from $v"; exit 1; }
+          grep -q "^## \[$v\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $v"; exit 1; }

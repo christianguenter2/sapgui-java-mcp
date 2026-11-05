@@ -3,7 +3,7 @@
 # agent. The existing launcher is not touched. Remove with: rm ~/.local/share/applications/sapgui-mcp-bridge.desktop
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-GUI="${SAPGUI_HOME:-$HOME/SAPClients/SAPGUI8.10rev14}"
+GUI="$("$REPO/scripts/sapgui-home")"
 "$REPO/agent/build.sh"
 icon=""
 orig="$HOME/.local/share/applications/$(basename "$GUI").desktop"

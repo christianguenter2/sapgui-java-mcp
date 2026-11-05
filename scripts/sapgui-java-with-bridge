@@ -2,9 +2,9 @@
 # PLATIN_JAVA wrapper for SAP GUI for Java: runs SAP GUI's own java with the bridge agent
 # (agent/bridge-agent.jar), which starts scripts/bridge.js once the GUI is up – no Scripting menu.
 #   PLATIN_JAVA=<repo>/scripts/sapgui-java-with-bridge  <sapgui home>/bin/guilogon
-# Env: SAPGUI_REAL_JAVA (default: the jre next to SAPGUI_HOME), SAPGUI_HOME (default ~/SAPClients/SAPGUI8.10rev14)
+# Env: SAPGUI_REAL_JAVA (default: the jre of the SAP GUI found by scripts/sapgui-home), SAPGUI_HOME
 REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
-HOME_GUI="${SAPGUI_HOME:-$HOME/SAPClients/SAPGUI8.10rev14}"
+HOME_GUI=$("$REPO/scripts/sapgui-home" 2>/dev/null || true)
 JAVA="${SAPGUI_REAL_JAVA:-$HOME_GUI/jre/bin/java}"
 [ -x "$JAVA" ] || JAVA=java
 AGENT="$REPO/agent/bridge-agent.jar"

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Print the SAP GUI for Java installation directory (the one containing bin/guilogon and jar/).
+# Order: $SAPGUI_HOME, ~/SAPClients/SAPGUI (a stable symlink, if you keep one), the newest
+# ~/SAPClients/SAPGUI*, then /opt/SAPClients/SAPGUI*. Exit 1 if none is found.
+ok() { [ -n "$1" ] && [ -x "$1/bin/guilogon" ] && [ -d "$1/jar" ]; }
+if ok "${SAPGUI_HOME:-}"; then printf '%s\n' "$SAPGUI_HOME"; exit 0; fi
+for d in "$HOME/SAPClients/SAPGUI" \
+         $(ls -1d "$HOME"/SAPClients/SAPGUI* 2>/dev/null | sort -rV) \
+         $(ls -1d /opt/SAPClients/SAPGUI* 2>/dev/null | sort -rV); do
+  if ok "$d"; then (cd "$d" && pwd -P); exit 0; fi
+done
+echo "SAP GUI for Java not found – set SAPGUI_HOME to its installation directory" >&2
+exit 1
