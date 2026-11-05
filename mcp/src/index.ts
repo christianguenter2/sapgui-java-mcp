@@ -5,14 +5,14 @@ import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { call, callBridge, readConfig, listBridges, statusAll, BridgeError } from "./bridge.js";
-import { formatGrid, formatTable, formatList, Screen, Grid, Table, ListResult } from "./format.js";
+import { formatGrid, formatTable, formatList, formatCtxMenu, Screen, Grid, Table, ListResult, CtxMenuResult } from "./format.js";
 import { renderScreen, View, VIEWS } from "./view.js";
 import { parseExpect } from "./expect.js";
 import { userFormats, cachedFormats } from "./formats.js";
 import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
 
 const server = new McpServer(
-  { name: "sapgui-java", version: "0.10.0" },
+  { name: "sapgui-java", version: "0.11.0" },
   {
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
@@ -69,6 +69,14 @@ const confirm = z.boolean().optional().describe(
 
 function withScreen(head: string, r: { screen?: Screen }, v: View | undefined): string {
   return r.screen ? `${head}\n${renderScreen(r.screen, v ?? "changed")}` : head;
+}
+
+const menuItem = z.string().optional().describe("Function code: of a toolbar menu entry, or of a context menu entry (code from the listed entries)");
+const menuText = z.string().optional().describe("Context menu entry by its text, or \"Submenu > Entry\" – instead of menuItem");
+
+// grid/tree action result: the context menu entries (while it is open) or the selected entry, then the screen
+function withCtxMenu(head: string, r: CtxMenuResult & { screen?: Screen }, v: View | undefined): string {
+  return withScreen(head + formatCtxMenu(r), r, v);
 }
 
 async function checkTcode(tcode: string) {
@@ -315,31 +323,39 @@ server.registerTool("sap_grid_action", {
   title: "ALV grid action",
   description: "Act on an ALV grid (control=SapGridWrapper): setCurrentCell, click, doubleClick, pressButton (button cell) with row + column " +
     "(technical name); selectRows (rows \"0,2-4\"), selectAll, clearSelection; pressColumnHeader (column); pressToolbar (button = toolbar id " +
-    "from sap_read_grid); pressToolbarContext (menu button, optional menuItem); selectToolbarMenuItem (menuItem). Returns the resulting screen. " +
-    "Toolbar buttons that save/delete/post are gated (confirm + expect).",
+    "from sap_read_grid); pressToolbarContext (menu button, optional menuItem); selectToolbarMenuItem (menuItem). " +
+    "Context menu: contextMenu (on row + column, or the current cell) lists its entries; selectContextMenuItem (menuItem = code " +
+    "from that list, or menuText) picks one; contextMenu with menuItem/menuText opens and picks in one call; closeContextMenu. " +
+    "Returns the resulting screen. Toolbar buttons and context menu entries that save/delete/post are gated (confirm + expect).",
   inputSchema: {
     id: z.string().describe("Grid id, e.g. wnd[0]/shellcont/shell"),
     action: z.enum(["setCurrentCell", "click", "doubleClick", "pressButton", "selectRows", "selectAll", "clearSelection",
-      "pressColumnHeader", "pressToolbar", "pressToolbarContext", "selectToolbarMenuItem"]),
+      "pressColumnHeader", "pressToolbar", "pressToolbarContext", "selectToolbarMenuItem",
+      "contextMenu", "selectContextMenuItem", "closeContextMenu"]),
     row: z.number().int().min(0).optional(), column: z.string().optional(),
     rows: z.string().optional().describe("selectRows: \"0\", \"0,2\", \"3-7\""),
-    button: z.string().optional(), menuItem: z.string().optional(),
+    button: z.string().optional(), menuItem, menuText,
     session, system, view, expect, confirm,
   },
-}, async (a) => run(async () => withScreen(`grid ${a.action}`, await call("grid_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
+}, async (a) => run(async () => withCtxMenu(`grid ${a.action}`, await call("grid_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
 server.registerTool("sap_tree_action", {
   title: "Tree action",
   description: "Act on a tree (control=SapTreeWrapper) by node key from sap_read_tree: select, expand, collapse, doubleClick; " +
-    "selectItem, doubleClickItem, clickLink, pressButton, checkbox (need item = column name or item index); unselectAll. Returns the resulting screen.",
+    "selectItem, doubleClickItem, clickLink, pressButton, checkbox (need item = column name or item index); unselectAll. " +
+    "Context menu: nodeContextMenu (node), itemContextMenu (node + item), headerContextMenu (item = column), defaultContextMenu " +
+    "list the entries; selectContextMenuItem (menuItem = code from that list, or menuText) picks one; an opener with " +
+    "menuItem/menuText opens and picks in one call; closeContextMenu. Entries that save/delete/post are gated (confirm + expect). " +
+    "Returns the resulting screen.",
   inputSchema: {
     id: z.string().describe("Tree id from sap_screen"),
-    action: z.enum(["select", "expand", "collapse", "doubleClick", "selectItem", "doubleClickItem", "clickLink", "pressButton", "checkbox", "unselectAll"]),
+    action: z.enum(["select", "expand", "collapse", "doubleClick", "selectItem", "doubleClickItem", "clickLink", "pressButton", "checkbox", "unselectAll",
+      "nodeContextMenu", "itemContextMenu", "headerContextMenu", "defaultContextMenu", "selectContextMenuItem", "closeContextMenu"]),
     node: z.string().optional().describe("Node key from sap_read_tree"),
-    item: z.string().optional(), checked: z.boolean().optional(),
+    item: z.string().optional(), checked: z.boolean().optional(), menuItem, menuText,
     session, system, view, expect, confirm,
   },
-}, async (a) => run(async () => withScreen(`tree ${a.action} ${a.node ?? ""}`.trim(), await call("tree_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
+}, async (a) => run(async () => withCtxMenu(`tree ${a.action} ${a.node ?? ""}`.trim(), await call("tree_action", { ...a, expect: parseExpect(a.expect) }), a.view)));
 
 server.registerTool("sap_read_list", {
   title: "Read classic list",

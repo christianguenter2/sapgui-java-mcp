@@ -252,8 +252,7 @@ passes in `sapgui-java-mcp.script`). Launcher: `scripts/install-autostart.sh`.
   Easy Access collapse/expand; SE16H T001 grid toolbar listing, selectRows, setCurrentCell,
   &SORT_DSC (opens the sort dialog – ALV sorts by selected *column*), doubleClick → detail pop-up;
   &DATA_SAVE refused by the gate.
-- Still open: context menus (grid `contextMenu()` / tree `nodeContextMenu()` open a GuiContextMenu
-  that has no select path in the Java wrappers yet).
+- Context menus: built in 0.11.0, see §18.
 
 ## 14. Screenshots – 2026-11-05
 
@@ -302,3 +301,40 @@ pages → PageDown, vkey 82).
 line with most cells outside those columns is printed as text. Columns are computed from the whole
 page even when only a slice is shown. SE16 T005 page: `view=full` 114.8k chars (cut at 3,000
 elements), `sap_read_list` 5.0k (−96 %), complete.
+
+## 18. Context menus in grids and trees – 2026-11-05
+
+**Opening.** `SapGridWrapper.contextMenu()` (on the current cell – `/grid_action` sets it first when
+row + column are given) and `SapTreeWrapper.nodeContextMenu(key)` / `itemContextMenu(key, item)` /
+`headerContextMenu(column)` / `defaultContextMenu()`. They return before the menu is shown in some
+cases – the bridge polls up to 1.5 s for it.
+
+**Where the menu lives.** Both wrappers inherit from `GuiShellWrapper`, which has
+`selectContextMenuItem(code)` / `…ByText` / `…ByPosition` → `GuiShell.selectContextMenuItem`, which
+uses the private field `mLastContextMenu` (`SapContextMenuI`) if set, else the control itself when it
+implements `GuiCtxMenuServiceI` (`SapGrid.getContextMenu()`). Trees (Easy Access, SE80) fill
+`mLastContextMenu`; the ALV grid leaves it null and keeps its own menu (`mCurrentContextMenu` holds a
+`GuiContextMenu` too, but it is not what gets selected). `/grid_action` and `/tree_action` look the
+popup up in the same order, so the entries listed are the ones the wrapper selects from. Both are a
+`SapContextMenu` (a Swing popup; `isVisible()` = open).
+
+**Listing.** No wrapper lists the entries (`getCurrentContextMenu()` wraps the `GuiContextMenu`).
+The popup's components are `SAPMenuItem` / `SAPMenu` (`JMenuItem` / `JMenu`) without a Swing action;
+the function code is `item.getHostComponent().getMenuBuildingBlock().getFunctionCode()` – the path
+`SapContextMenu.getFCodeForMenuItemText` takes. The building block also says `isDefaultFunction()`.
+Fallbacks: `SapContextMenu$SelectAction.fCode`, then the action command.
+
+**Selecting.** `SapContextMenu.selectContextMenuItem(code)` fires a new `SelectAction(code)` without
+checking that the menu has the code – the bridge resolves `menuItem` / `menuText` (text, or the path
+`"Submenu > Entry"`, case-insensitive, `&` mnemonics removed) against the listed entries first:
+unknown → 404 with the entry list, ambiguous text → 409, disabled → 409; the menu is closed
+(`hide()`) on every refusal. Entries whose code matches `ALV_WRITE_CODES` or whose text matches the
+save/commit words go through the write gate (`gateWrite`, the same 428 rules) once the entry is
+known – the gate before the request cannot know the text. `ALV_VIEW_CODES` (`&DELETE_FILTER`,
+`&DELETE_SORT`) are exempt, also for toolbar buttons.
+
+**Verified (A4H/001).** Easy Access tree: node menus (`XXEXEC` default, `XXADDF`, `XXECK1` …),
+`XXDELF` "Delete All Favorites" refused by the gate, favorites intact. S416H T000 grid: 9 entries
+(`&OPTIMIZE`, `&FILTER`, disabled `&LOCAL&PASTE` …), select from an open menu and open+select in one
+call (`&FILTER` opens the filter pop-up), disabled/unknown refused. SE80 class tree: nested submenus
+three levels deep, `"Check > Syntax"` → `WB_CHECK` ("No syntax errors found"), `WB_DELETE` refused.

@@ -17,8 +17,10 @@
 //   /command  {session?, command}         sendCommand (OK-code, e.g. "/nSE16N")
 //   /grid     {session?, id, firstRow?, maxRows?, columns?}   ALV grid rows
 //   /tree     {session?, id, maxNodes?}   tree nodes (key, parent, text, folder, expanded)
-//   /grid_action {session?, id, action, row?, column?, rows?, button?, menuItem?}   ALV grid actions
-//   /tree_action {session?, id, action, node, item?, checked?}                     tree actions
+//   /grid_action {session?, id, action, row?, column?, rows?, button?, menuItem?, menuText?}  ALV grid actions
+//   /tree_action {session?, id, action, node, item?, checked?, menuItem?, menuText?}           tree actions
+//             (context menus: contextMenu / nodeContextMenu … list the entries; menuItem = code or
+//             menuText selects one, also in the same call; context menu entries pass the write gate)
 //   /table    {session?, id, firstRow?, maxRows?, columns?, skipEmpty?}   dynpro table control rows
 //             (scrolls the table for rows outside the visible page)
 //   /session_open  {session?}             open a new session (createSession) next to the given one; returns its id
@@ -40,7 +42,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.10.0";
+  var BRIDGE_VERSION = "0.11.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -216,6 +218,8 @@
   var YES_BUTTON = /(SPOP-OPTION1|BUTTON_1|BUTTON_YES)$/;
   // ALV function codes that write: &DATA_SAVE, &SAVE, &DELETE, &LOCAL&DELETE_ROW, &POST …
   var ALV_WRITE_CODES = /(SAVE|DELETE|DELE|POST|BUCH|SICH|RELEASE|REVERSE|STORNO)/i;
+  // … except codes that only change the view ("Delete Filter" removes the filter, not data)
+  var ALV_VIEW_CODES = /^&(DELETE_FILTER|DELETE_SORT)$/;
 
   // texts of the active modal window, or null when wnd[0] is active
   function popupTexts(ses) {
@@ -245,6 +249,7 @@
       var g = tryCall(function () { return findEl(ses, body.id); }, null);
       var tbb = g === null ? null : tryCall(function () { return gridToolbarButton(g, str(body.button)); }, null);
       var label = tbb === null ? "" : (tbb.text || tbb.tooltip);
+      if (ALV_VIEW_CODES.test(code)) return null;
       if (ALV_WRITE_CODES.test(code) || SAVE_WORDS.test(label) || COMMIT_WORDS.test(label) ||
           (tbb !== null && (SAVE_WORDS.test(tbb.tooltip) || COMMIT_WORDS.test(tbb.tooltip))))
         return "ALV toolbar " + code + (label ? " " + JSON.stringify(label) : "");
@@ -268,10 +273,19 @@
     return null;
   }
 
+  // config and audit record of the request being processed (requests run one at a time), so that
+  // actions can apply the write gate once they know what they would do (context menu entries)
+  var curReq = { cfg: {}, rec: {} };
   function checkWrite(ses, cfg, path, body, rec) {
+    curReq = { cfg: cfg, rec: rec };
     var w = writeIntent(ses, path, body);
     if (w === null) return;
-    rec.writeAction = w;
+    gateWrite(ses, w, body);
+  }
+
+  function gateWrite(ses, w, body) {
+    var cfg = curReq.cfg;
+    curReq.rec.writeAction = w;
     if (cfg.confirmWrites === false) return;
     if (!body.confirm)
       fail(428, "write gate: " + w + " saves data – nothing was done. Ask the user, then repeat with confirm: true " +
@@ -963,12 +977,158 @@
     return null;
   }
 
+  // ---- context menus of grid and tree controls
+  // grid.contextMenu() / tree.nodeContextMenu() … open a SapContextMenu (a Swing popup) that the
+  // control's GuiShell keeps in the private field mLastContextMenu. The scripting wrappers can
+  // select an entry by function code (GuiShellWrapper.selectContextMenuItem → SapContextMenu
+  // .selectContextMenuItem, which fires the code WITHOUT checking that the menu has it), but they
+  // cannot list the entries – so the bridge reads them from the popup's Swing items (see ctxMenuItems).
+  var JMenu = Java.type("javax.swing.JMenu"), JMenuItem = Java.type("javax.swing.JMenuItem");
+  var JCheckBoxMenuItem = Java.type("javax.swing.JCheckBoxMenuItem"), JRadioButtonMenuItem = Java.type("javax.swing.JRadioButtonMenuItem");
+
+  // the popup GuiShell.selectContextMenuItem would use: mLastContextMenu (trees), else the control's
+  // own menu (SapGrid implements GuiCtxMenuServiceI.getContextMenu()) – same order, so that the
+  // entries listed are the ones the wrapper selects from
+  function ctxPopup(w) {
+    var sh = scriptObject(w);
+    if (sh === null) return null;
+    var pm = privateField(sh, "mLastContextMenu");
+    if (pm !== null) return pm;
+    var jo = privateField(sh, "mJavaObject");
+    return jo === null ? null : tryCall(function () { return jo.getContextMenu(); }, null);
+  }
+
+  function ctxMenuOpen(w) {
+    var pm = ctxPopup(w);
+    return pm !== null && !!tryCall(function () { return pm.isVisible(); }, false);
+  }
+
+  function menuLabel(s) { return str(s).replace(/&/g, "").replace(/\s+/g, " ").trim(); }
+
+  // entries of the open context menu: {code, text, path, level, enabled, submenu?, checked?}
+  function ctxMenuItems(w, debug) {
+    var pm = ctxPopup(w);
+    if (pm === null || !tryCall(function () { return pm.isVisible(); }, false)) return null;
+    var out = [];
+    (function walk(comps, level, prefix) {
+      var arr = toList(comps);
+      for (var i = 0; i < arr.length; i++) {
+        var c = arr[i];
+        if (!(c instanceof JMenuItem)) continue;                      // separators, fillers
+        if (!tryCall(function () { return c.isVisible(); }, true)) continue;
+        var text = menuLabel(tryCall(function () { return c.getText(); }, ""));
+        var path = prefix ? prefix + " > " + text : text;
+        var e = { code: "", text: text, path: path, level: level, enabled: !!tryCall(function () { return c.isEnabled(); }, true) };
+        if (c instanceof JMenu) {
+          e.submenu = true;
+          out.push(e);
+          walk(tryCall(function () { return c.getMenuComponents(); }, null), level + 1, path);
+          continue;
+        }
+        // SAPMenuItem → its GuiMenu's MenuBuildingBlock holds the code (as SapContextMenu
+        // .getFCodeForMenuItemText reads it); items built with a SelectAction carry it in fCode
+        var mbb = tryCall(function () { return c.getHostComponent().getMenuBuildingBlock(); }, null);
+        var act = tryCall(function () { return c.getAction(); }, null);
+        var code = mbb !== null ? tryCall(function () { return mbb.getFunctionCode(); }, null) : null;
+        if (code === null && act !== null) code = privateField(act, "fCode");
+        e.code = str(code !== null ? code : tryCall(function () { return c.getActionCommand(); }, ""));
+        if (mbb !== null && tryCall(function () { return mbb.isDefaultFunction(); }, false)) e["default"] = true;
+        if (debug) e.debug = { item: str(c.getClass().getName()), block: mbb !== null, action: act === null ? null : str(act.getClass().getName()), popup: str(pm.getClass().getName()) };
+        if (c instanceof JCheckBoxMenuItem || c instanceof JRadioButtonMenuItem) e.checked = !!tryCall(function () { return c.isSelected(); }, false);
+        out.push(e);
+      }
+    })(tryCall(function () { return pm.getComponents(); }, null), 0, "");
+    return out;
+  }
+
+  // the entry named by body.menuItem (function code) or body.menuText (text or "Parent > Text"),
+  // or a 4xx error that lists the entries
+  function ctxMenuEntry(items, body) {
+    var code = str(body.menuItem), txt = menuLabel(body.menuText).toLowerCase();
+    var hits = [];
+    for (var i = 0; i < items.length; i++) {
+      var e = items[i];
+      if (e.submenu) continue;
+      if (code !== "" ? e.code === code : (e.text.toLowerCase() === txt || e.path.toLowerCase() === txt)) hits.push(e);
+    }
+    var listing = items.filter(function (e) { return !e.submenu; })
+      .map(function (e) { return e.code + "=" + JSON.stringify(e.path) + (e.enabled ? "" : " (disabled)"); }).join(", ");
+    if (hits.length === 0)
+      fail(404, "context menu has no entry " + (code !== "" ? code : JSON.stringify(body.menuText)) + " – entries: " + listing);
+    if (hits.length > 1)
+      fail(409, "menu text " + JSON.stringify(body.menuText) + " is ambiguous – pass menuItem (code) or the path \"Parent > Text\": " +
+        hits.map(function (e) { return e.code + "=" + JSON.stringify(e.path); }).join(", "));
+    if (!hits[0].enabled) fail(409, "context menu entry " + hits[0].code + " " + JSON.stringify(hits[0].path) + " is disabled");
+    return hits[0];
+  }
+
+  function closeCtxMenu(w) {
+    var pm = ctxPopup(w);
+    if (pm !== null && tryCall(function () { return pm.isVisible(); }, false)) tryCall(function () { pm.hide(); return 0; }, 0);
+  }
+
+  // open (opener: function that opens the menu, or null when it should already be open) and,
+  // if body.menuItem / body.menuText is given, select an entry. Selecting goes through the write gate
+  // with the entry's code and text – the gate before the request cannot know the text yet.
+  function ctxMenuAction(ses, w, body, opener) {
+    if (opener !== null) {
+      closeCtxMenu(w);
+      opener();
+      w = findEl(ses, body.id);
+      for (var k = 0; k < 15 && !ctxMenuOpen(w); k++) Java.type("java.lang.Thread").sleep(100);   // the menu may come after the round trip
+      if (!ctxMenuOpen(w)) {
+        var popup = tryCall(function () { return relId(ses.getActiveWindow().getId()); }, "wnd[0]");
+        var res = { opened: false, note: popup !== "wnd[0]" ? "no context menu; window " + popup + " opened instead" : "no context menu appeared" };
+        if (body.debug) {
+          var sh = scriptObject(w), lm = sh === null ? null : privateField(sh, "mLastContextMenu"), cm = sh === null ? null : privateField(sh, "mCurrentContextMenu");
+          res.debug = { shell: sh === null ? null : str(sh.getClass().getName()),
+            last: lm === null ? null : str(lm.getClass().getName()) + " visible=" + tryCall(function () { return lm.isVisible(); }, "?"),
+            current: cm === null ? null : str(cm.getClass().getName()),
+            javaObject: sh === null ? null : str(tryCall(function () { return privateField(sh, "mJavaObject").getClass().getName(); }, "?")) };
+        }
+        return res;
+      }
+    }
+    var items = ctxMenuItems(w, !!body.debug);
+    if (str(body.menuItem) === "" && str(body.menuText) === "") {
+      if (items === null) fail(409, "no context menu is open on " + relId(w.getId()) + " – open it first (contextMenu / nodeContextMenu …)");
+      return { opened: true, items: items };
+    }
+    if (items === null) fail(409, "no context menu is open on " + relId(w.getId()) + " – open it first (contextMenu / nodeContextMenu …)");
+    var e;
+    try {
+      e = ctxMenuEntry(items, body);
+      var label = e.path;
+      if (!ALV_VIEW_CODES.test(e.code) && (ALV_WRITE_CODES.test(e.code) || SAVE_WORDS.test(e.text) || COMMIT_WORDS.test(e.text)))
+        gateWrite(ses, "context menu " + e.code + " " + JSON.stringify(label), body);
+    } catch (err) { closeCtxMenu(w); throw err; }
+    w.selectContextMenuItem(e.code);
+    return { selected: { code: e.code, text: e.path } };
+  }
+
+  function needMenuEntry(a, body) {
+    if (str(body.menuItem) === "" && str(body.menuText) === "") fail(400, a + " needs menuItem (function code) or menuText");
+    return body;
+  }
+
+  // result of a grid/tree action: the context menu (entries while it is open, or what was selected)
+  // goes next to the screen; while a menu is open the screen is the one behind it
+  function ctxResult(ses, body, res, ctx) {
+    if (ctx !== null) {
+      if (ctx.items) res.contextMenu = ctx.items;
+      if (ctx.selected) res.selected = ctx.selected;
+      if (ctx.opened === false) { res.note = ctx.note; if (ctx.debug) res.debug = ctx.debug; }
+    }
+    return after(ses, body, res);
+  }
+
   // /grid_action {id, action, row?, column?, rows?, button?, menuItem?}
   function opGridAction(ses, body) {
     var g = findEl(ses, body.id);
     if (str(g.getClass().getSimpleName()) !== "SapGridWrapper") fail(400, "not an ALV grid: " + relId(g.getId()));
     var a = str(body.action), row = body.row === undefined ? -1 : Number(body.row), col = str(body.column);
     function needCell() { if (row < 0 || col === "") fail(400, "action " + a + " needs row and column (technical column name)"); }
+    var ctx = null;
     switch (a) {
       case "setCurrentCell": needCell(); g.setCurrentCell(row, col); break;
       case "click": needCell(); g.click(row, col); break;
@@ -989,9 +1149,15 @@
         if (str(body.menuItem) !== "") g.selectToolbarMenuItem(str(body.menuItem));
         break;
       case "selectToolbarMenuItem": if (str(body.menuItem) === "") fail(400, "selectToolbarMenuItem needs menuItem"); g.selectToolbarMenuItem(str(body.menuItem)); break;
-      default: fail(400, "unknown grid action " + a + " (setCurrentCell, click, doubleClick, pressButton, selectRows, selectAll, clearSelection, pressColumnHeader, pressToolbar, pressToolbarContext, selectToolbarMenuItem)");
+      case "contextMenu":                                                   // on the current cell, or on row + column
+        if ((row >= 0) !== (col !== "")) fail(400, "contextMenu takes row and column together (or neither: current cell)");
+        ctx = ctxMenuAction(ses, g, body, function () { if (row >= 0) g.setCurrentCell(row, col); g.contextMenu(); });
+        break;
+      case "selectContextMenuItem": ctx = ctxMenuAction(ses, g, needMenuEntry(a, body), null); break;
+      case "closeContextMenu": closeCtxMenu(g); break;
+      default: fail(400, "unknown grid action " + a + " (setCurrentCell, click, doubleClick, pressButton, selectRows, selectAll, clearSelection, pressColumnHeader, pressToolbar, pressToolbarContext, selectToolbarMenuItem, contextMenu, selectContextMenuItem, closeContextMenu)");
     }
-    return after(ses, body, { ok: true, id: relId(g.getId()), action: a });
+    return ctxResult(ses, body, { ok: true, id: relId(g.getId()), action: a }, ctx);
   }
 
   // /tree_action {id, action, node, item?, checked?}
@@ -999,8 +1165,10 @@
     var t = findEl(ses, body.id);
     if (str(t.getClass().getSimpleName()) !== "SapTreeWrapper") fail(400, "not a tree: " + relId(t.getId()));
     var a = str(body.action), node = str(body.node), item = str(body.item);
-    if (node === "" && a !== "unselectAll") fail(400, "action " + a + " needs node (key from sap_read_tree)");
+    if (node === "" && !/^(unselectAll|headerContextMenu|defaultContextMenu|selectContextMenuItem|closeContextMenu)$/.test(a))
+      fail(400, "action " + a + " needs node (key from sap_read_tree)");
     function needItem() { if (item === "") fail(400, "action " + a + " needs item (column name / item index)"); }
+    var ctx = null;
     switch (a) {
       case "select": t.selectNode(node); break;
       case "expand": t.expandNode(node); break;
@@ -1012,9 +1180,15 @@
       case "pressButton": needItem(); t.pressButton(node, item); break;
       case "checkbox": needItem(); t.changeCheckbox(node, item, body.checked !== false); break;
       case "unselectAll": t.unselectAll(); break;
-      default: fail(400, "unknown tree action " + a + " (select, expand, collapse, doubleClick, selectItem, doubleClickItem, clickLink, pressButton, checkbox, unselectAll)");
+      case "nodeContextMenu": ctx = ctxMenuAction(ses, t, body, function () { t.nodeContextMenu(node); }); break;
+      case "itemContextMenu": needItem(); ctx = ctxMenuAction(ses, t, body, function () { t.itemContextMenu(node, item); }); break;
+      case "headerContextMenu": needItem(); ctx = ctxMenuAction(ses, t, body, function () { t.headerContextMenu(item); }); break;
+      case "defaultContextMenu": ctx = ctxMenuAction(ses, t, body, function () { t.defaultContextMenu(); }); break;
+      case "selectContextMenuItem": ctx = ctxMenuAction(ses, t, needMenuEntry(a, body), null); break;
+      case "closeContextMenu": closeCtxMenu(t); break;
+      default: fail(400, "unknown tree action " + a + " (select, expand, collapse, doubleClick, selectItem, doubleClickItem, clickLink, pressButton, checkbox, unselectAll, nodeContextMenu, itemContextMenu, headerContextMenu, defaultContextMenu, selectContextMenuItem, closeContextMenu)");
     }
-    return after(ses, body, { ok: true, id: relId(t.getId()), action: a, node: node });
+    return ctxResult(ses, body, { ok: true, id: relId(t.getId()), action: a, node: node }, ctx);
   }
 
   // Trees: type 0 = simple, 1 = list tree, 2 = column tree. In list and column trees the visible

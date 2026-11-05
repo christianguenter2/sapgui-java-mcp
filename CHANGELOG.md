@@ -3,6 +3,19 @@
 All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP server
 (`mcp/package.json`) and this file in lockstep; CI checks that they match.
 
+## [0.11.0] – 2026-11-05
+
+### Added
+- Context menus in ALV grids and trees: `sap_grid_action` `contextMenu` (on row + column or the
+  current cell) and `sap_tree_action` `nodeContextMenu` / `itemContextMenu` / `headerContextMenu` /
+  `defaultContextMenu` list the entries (function code, text, submenus, disabled/checked);
+  `selectContextMenuItem` picks one by `menuItem` (code) or `menuText` (text or `"Submenu > Entry"`);
+  an opener with `menuItem`/`menuText` opens and picks in one call; `closeContextMenu`.
+- Write gate: context menu entries that save/delete/post/release need `confirm` + `expect`.
+
+### Changed
+- ALV codes that only change the view (`&DELETE_FILTER`, `&DELETE_SORT`) no longer trip the write gate.
+
 ## [0.10.0] – 2026-11-05
 
 First public, **experimental** release. Tested on SAP GUI for Java 8.10 (Linux) against an

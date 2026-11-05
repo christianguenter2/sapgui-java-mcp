@@ -172,3 +172,23 @@ export function formatList(l: ListResult, firstRow = 0, maxRows = 200): string {
   lines.push("columns are the start positions of the cells (@col); '=' marks an editable field");
   return lines.join("\n");
 }
+
+// ---- context menus of grid and tree controls
+export interface CtxMenuEntry { code: string; text: string; path: string; level: number; enabled: boolean; submenu?: boolean; checked?: boolean }
+export interface CtxMenuResult { contextMenu?: CtxMenuEntry[]; selected?: { code: string; text: string }; note?: string }
+
+// " – selected CODE "Text"", or the open menu's entries (one per line, indented by submenu level)
+export function formatCtxMenu(r: CtxMenuResult): string {
+  if (r.selected) return ` – selected ${r.selected.code} ${JSON.stringify(r.selected.text)}`;
+  if (r.note) return ` – ${r.note}`;
+  if (!r.contextMenu) return "";
+  if (r.contextMenu.length === 0) return "\ncontext menu is open but empty (closeContextMenu)";
+  const lines = [`\ncontext menu (${r.contextMenu.filter(e => !e.submenu).length} entries; selectContextMenuItem with menuItem = code, or closeContextMenu):`];
+  for (const e of r.contextMenu) {
+    const pad = "  ".repeat(e.level + 1);
+    const flags = [e.enabled ? "" : "disabled", e.checked === undefined ? "" : (e.checked ? "checked" : "unchecked")].filter(Boolean);
+    const tail = flags.length ? ` (${flags.join(", ")})` : "";
+    lines.push(e.submenu ? `${pad}${e.text} >${tail}` : `${pad}${e.code}\t${e.text}${tail}`);
+  }
+  return lines.join("\n");
+}

@@ -11,7 +11,7 @@ const rx = name => {
   return eval(m[1]);
 };
 const SAVE_WORDS = rx("SAVE_WORDS"), SAVE_CODES = rx("SAVE_CODES"), COMMIT_WORDS = rx("COMMIT_WORDS"),
-  COMMIT_QUESTION = rx("COMMIT_QUESTION"), ALV_WRITE_CODES = rx("ALV_WRITE_CODES");
+  COMMIT_QUESTION = rx("COMMIT_QUESTION"), ALV_WRITE_CODES = rx("ALV_WRITE_CODES"), ALV_VIEW_CODES = rx("ALV_VIEW_CODES");
 
 test("save/post buttons", () => {
   for (const t of ["Save", "Post", "Buchen", "Sichern", "Speichern", " Save as Variant..."]) assert.ok(SAVE_WORDS.test(t), t);
@@ -34,4 +34,8 @@ test("pop-up questions that lead to a write – but not information texts", () =
 test("ALV toolbar function codes", () => {
   for (const c of ["&DATA_SAVE", "&SAVE", "&DELETE", "&LOCAL&DELETE_ROW"]) assert.ok(ALV_WRITE_CODES.test(c), c);
   for (const c of ["&SORT_ASC", "&DETAIL", "&MB_FILTER", "&FIND"]) assert.ok(!ALV_WRITE_CODES.test(c), c);
+});
+test("ALV codes that only change the view are exempt – write codes are not", () => {
+  for (const c of ["&DELETE_FILTER", "&DELETE_SORT"]) assert.ok(ALV_VIEW_CODES.test(c), c);
+  for (const c of ["&DELETE", "&LOCAL&DELETE_ROW", "&DATA_SAVE", "&DELETE_FILTER_X"]) assert.ok(!ALV_VIEW_CODES.test(c), c);
 });

@@ -10,10 +10,10 @@ The agent works in **its own SAP GUI session** next to yours, every Save/Post ne
 confirmation, and screens come back in a compact, token-saving form. Design notes and everything
 learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
-> **Status: experimental (0.10.0).** Use it on **development, test and trial systems only** – never on
+> **Status: experimental (0.11.0).** Use it on **development, test and trial systems only** – never on
 > production. An AI agent drives a logged-on SAP GUI with your user's authorizations. The write gate
 > (`confirm`) is a **heuristic** based on button texts, OK-codes and pop-up questions in English and
-> German; it does not catch every write (context menus, for example), and it is no substitute for
+> German; it does not catch every write (function codes a program maps to saving, for example), and it is no substitute for
 > authorizations and your own review. You use this software at your own risk (see [LICENSE](LICENSE)).
 
 > **Internals.** SAP GUI's public scripting API leaves gaps (pop-up HTML text, some tree texts, table
@@ -113,11 +113,11 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 | `sap_send_key` | named key (Enter, Back, Execute, Save, Cancel, PageDown, …) or numeric VKey; optional `window` |
 | `sap_send_command` | OK-code (`command`, e.g. `/nSE16N`) |
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`) plus toolbar ids, selected rows, current cell; waits for lazily loaded rows and warns about rows that stayed empty |
-| `sap_grid_action` | ALV grid: `setCurrentCell`, `click`, `doubleClick`, `pressButton` (row + technical column), `selectRows` (`"0,2-4"`), `selectAll`, `clearSelection`, `pressColumnHeader`, `pressToolbar` (button id), `pressToolbarContext` / `selectToolbarMenuItem` |
+| `sap_grid_action` | ALV grid: `setCurrentCell`, `click`, `doubleClick`, `pressButton` (row + technical column), `selectRows` (`"0,2-4"`), `selectAll`, `clearSelection`, `pressColumnHeader`, `pressToolbar` (button id), `pressToolbarContext` / `selectToolbarMenuItem`; context menu: `contextMenu` (row + column or current cell), `selectContextMenuItem` (`menuItem` = code or `menuText`), `closeContextMenu` |
 | `sap_read_table` | dynpro table control rows (`id`, `firstRow`, `maxRows` default 50, `columns`, `skipEmpty` default true); cell ids usable with `sap_set_fields` |
 | `sap_read_list` | classic list output (WRITE lists, SE16 results, report output: `lbl[col,line]` …) as a table – one column per cell start position, title lines as text, PageDown hint; ~95 % smaller than `view=full` |
 | `sap_read_tree` | tree nodes (`id`, `maxNodes` default 300): key, parent, folder state, text; list/column trees with their item columns |
-| `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll` |
+| `sap_tree_action` | tree by node key: `select`, `expand`, `collapse`, `doubleClick`, `selectItem`, `doubleClickItem`, `clickLink`, `pressButton`, `checkbox`, `unselectAll`; context menu: `nodeContextMenu`, `itemContextMenu`, `headerContextMenu`, `defaultContextMenu`, `selectContextMenuItem`, `closeContextMenu` |
 | `sap_screenshot` | PNG of the active window (or `window`, e.g. `wnd[1]`), returned as an image plus the saved path |
 | `sap_user_formats` | the user's date format, decimal notation, time format (SU3 defaults, read in a separate session that is closed again; cached) |
 | `sap_open_session` | open a new agent session for a `system` and make it that system's default (normally automatic) |
@@ -157,10 +157,11 @@ Refused with HTTP 428 unless the request has `confirm: true` **and** `expect`:
   the OK-code field + Enter);
 - actions that commit at once: buttons/menu entries Close/Release/Reverse/Delete (+ German);
   Yes or Enter in a pop-up whose question is about saving, posting, closing, deleting, reversing,
-  releasing or creating; ALV toolbar buttons and toolbar menu entries that save/delete/post/release.
+  releasing or creating; ALV toolbar buttons, toolbar menu entries and grid/tree context menu entries
+  that save/delete/post/release.
 
 "No" to "Save changes?", "Cancel" and "Continue" stay free. Every write is logged in `bridge.log`
-(`writeAction`). Not covered yet: context menus. Disable with `"confirmWrites": false`.
+(`writeAction`). Disable with `"confirmWrites": false`.
 
 ### Pop-ups
 
@@ -246,9 +247,8 @@ that talks to SAP GUI is tested manually against real systems.
 
 ## Status
 
-Experimental, in use against development and trial systems since 2026-11-04. Open: context menus
-(grid/tree), text edit / ABAP editor controls, tests against a live SAP GUI. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§17.
+Experimental, in use against development and trial systems since 2026-11-04. Open: text edit / ABAP editor controls, tests against a live SAP GUI. History and findings:
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§18.
 
 ## License
 
