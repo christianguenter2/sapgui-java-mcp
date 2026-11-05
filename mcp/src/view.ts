@@ -63,6 +63,9 @@ function compactElement(e: Element, label: string | undefined, tipToo: boolean):
   else if (e.tooltip && e.type === "GuiButton" && !e.text) parts.push(`(${e.tooltip})`);
   if (e.control) parts.push(`control=${e.control}${e.subtype ? "/" + e.subtype : ""}`);
   if (e.rowCount !== undefined) parts.push(`rows=${e.rowCount}`);
+  if (e.label) parts.push(`label=${q(e.label)}`);
+  if (e.key !== undefined && e.control === "SapComboBoxWrapper") parts.push(`key=${q(e.key)}`);
+  if (e.buttons?.length) parts.push(`buttons: ${e.buttons.map(b => `${b.id}=${q(b.text || b.tooltip)}${/menu/i.test(b.type) ? " (menu)" : ""}${b.disabled ? " (disabled)" : ""}${b.checked ? " [x]" : ""}`).join(", ")}`);
   if (e.lineCount !== undefined) parts.push(`lines=${e.lineCount}${e.changeable === false ? " ro" : e.changeable ? " editable" : ""}${e.modified ? " modified" : ""} (sap_read_text)`);
   if (e.title) parts.push(`title=${q(e.title)}`);
   if (e.html) parts.push(`html=${q(e.html.length > 200 ? e.html.slice(0, 200) + " …" : e.html)}`);

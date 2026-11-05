@@ -3,6 +3,18 @@
 All notable changes. Versions follow the bridge (`scripts/bridge.js`), the MCP server
 (`mcp/package.json`) and this file in lockstep; CI checks that they match.
 
+## [0.14.0] – 2026-11-05
+
+### Added
+- Toolbar controls (`SapToolBarWrapper` – SE80, editors, newer transactions): the screen lists their
+  buttons (id = function code, text, menu/disabled/checked); `sap_press` with `button` presses one,
+  with `menuItem` picks an entry of a menu button (validated against the menu); a menu button
+  without `menuItem` returns its entries. Buttons and menu entries that save/delete/post are gated.
+- Input fields and combo boxes inside controls (`SapInputFieldWrapper`, `SapComboBoxWrapper` – e.g.
+  SE80 object type and name): `sap_set_fields` sets them (combo by key or `by: "value"`, unknown
+  entries refused with the list), `submit: true` submits an input field and returns the screen.
+- Live test: SE80 step (object type + name, object list, toolbar buttons and menu, gate).
+
 ## [0.13.0] – 2026-11-05
 
 ### Changed

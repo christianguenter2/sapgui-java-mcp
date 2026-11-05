@@ -42,10 +42,11 @@ const ok = (r: Result, what: string) => check(!r.isError, `${what} failed`, r);
 const refused = (r: Result, pattern: RegExp, what: string) => check(r.isError && pattern.test(r.text), `${what} should be refused (${pattern})`, r);
 
 // id of the first control of a type in a compact/full screen: "container/\n  shell Shell control=X"
-function controlId(screen: string, control: string): string | undefined {
+function controlId(screen: string, control: string, lineMatch?: RegExp): string | undefined {
   let container = "";
   for (const line of screen.split("\n")) {
     if (/^\S.*\/$/.test(line)) container = line.trim();
+    if (lineMatch && !lineMatch.test(line)) continue;
     const m = /^\s+(\S+) .*control=(\w+)/.exec(line);
     if (m && m[2] === control) return container + m[1];
     const f = /^\s*(\S+)\s+Shell\s.*control=(\w+)/.exec(line);       // view=full: absolute id first
@@ -190,6 +191,28 @@ step("text editor (SAPTEXTEDIT_DEMO_1): replace, insert, read, range check", asy
   check(/1\| line one\n2\| inserted – äöü\n3\| LINE THREE/.test(t.text) && /modified/.test(t.text), "unexpected text", t);
   refused(await tool("sap_set_text", { id: ed, fromLine: 9, text: "x", view: "status" }), /fromLine\/toLine must lie in 1\.\.3/, "line out of range");
   ok(await tool("sap_send_key", { key: "Back", view: "status" }), "Back");
+});
+
+step("SE80: combo box + input field controls, toolbar control buttons and menus", async () => {
+  const s = await tool("sap_start_transaction", { tcode: "SE80", view: "compact" });
+  ok(s, "SE80");
+  const cb = controlId(s.text, "SapComboBoxWrapper"), inp = controlId(s.text, "SapInputFieldWrapper");
+  const tb = controlId(s.text, "SapToolBarWrapper", /WB_BOOKMARK_SELECT=/);
+  check(cb && inp && tb, "object type / name / tree toolbar not found (Repository Browser not shown?)", s);
+  refused(await tool("sap_set_fields", { fields: [{ id: cb, value: "NOPE" }] }), /has no entry with key "NOPE" – entries: .*P="Program"/, "unknown combo key");
+  const set = await tool("sap_set_fields", { fields: [{ id: cb, value: "Program", by: "value" }, { id: inp, value: "RSPARAM", submit: true }], view: "compact" });
+  ok(set, "Program RSPARAM + submit");
+  check(/\(SapComboBoxWrapper\) = "P"/.test(set.text) && /submitted/.test(set.text) && !/POPUP/.test(set.text), "combo/submit result", set);
+  const tree = controlId(set.text, "SapTreeWrapper") ?? await findControl("SapTreeWrapper");
+  const t = await tool("sap_read_tree", { id: tree, maxNodes: 5 });
+  check(/\tRSPARAM\t/.test(t.text), "object list does not show RSPARAM", t);
+  const m = await tool("sap_press", { id: tb, button: "WB_BOOKMARK_SELECT", view: "status" });
+  ok(m, "Favorites menu");
+  check(/^menu \(\d+ entries; sap_press with button WB_BOOKMARK_SELECT/m.test(m.text) && /WB_BOOKMARK_CREATE\t/.test(m.text), "menu entries", m);
+  refused(await tool("sap_press", { id: tb, button: "WB_BOOKMARK_SELECT", menuItem: "WB_NOPE", view: "status" }), /no entry WB_NOPE/, "unknown menu entry");
+  refused(await tool("sap_press", { id: tb, button: "NOPE", view: "status" }), /has no button NOPE – buttons: .*EXPAND_ALL/, "unknown button");
+  refused(await tool("sap_press", { id: tb, button: "WB_DELETE", view: "status" }), /write gate: toolbar WB_DELETE/, "toolbar code with DELETE");
+  ok(await tool("sap_press", { id: tb, button: "EXPAND_ALL", view: "status" }), "Expand Subtree");
 });
 
 step("agent session ended by SAP (/i): reported, next call gets a new one", async () => {

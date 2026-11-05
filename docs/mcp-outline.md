@@ -406,3 +406,30 @@ lists what the key is bound to without sending it (the gate still applies).
 Still heuristic: a menu entry or key whose label is not a save/commit word (in English or German)
 and is not bound to Ctrl+S passes – function codes are invisible to the front end.
 
+## 22. Toolbar, input field and combo box controls – 2026-11-05
+
+SE80 (and many newer transactions) put their toolbars and entry fields into controls, which the
+bridge could show but not operate.
+
+**Toolbar controls** (`SapToolBarWrapper`): `getButtonCount()`, `getButtonId/Text/Tooltip/Type/
+Enabled/Checked(i)`, `pressButton(id)`, `pressContextButton(id)`, `selectMenuItem(id)`. Ids are the
+function codes (SE80 tree toolbar: `WB_BACK_TB`, `EXPAND_ALL`, `WB_BOOKMARK_SELECT` …). Types:
+`Button`, `ButtonAndMenu` (pressing it runs the button; the menu needs `menuItem`), `Menu` (only a
+menu), `CheckBox`, `Separator`. An opened menu is a `SapContextMenu` in the bean's private field
+`SapToolBar.mLastMenuVisible` (not in `GuiShell.mLastContextMenu`) – `ctxPopup` looks there too, so
+the entries are read like context menus (§18). A `Menu` button without `menuItem` lists the entries
+and closes the menu again; with `menuItem` the menu is opened, the entry validated (exists, enabled)
+and gated with its text, then `selectMenuItem`.
+
+**Combo box controls** (`SapComboBoxWrapper`): `getEntries()` returns a collection whose entries are
+collections themselves: `[key, text]` (SE80: `P`="Program", `O`="Class/Interface", `$TM`="Local
+Objects" …). **`setSelected(key)` alone only changes the display** – SE80 kept searching for a class
+and offered to create "Class/Interface RSPARAM". `selected()` afterwards fires the selection event.
+
+**Input field controls** (`SapInputFieldWrapper`): `setText()`, `submit()` (= Enter in the field: SE80
+shows the object). `getLabelText()` was empty in SE80.
+
+Verified (A4H/001, SE80): Program + RSPARAM submitted → object list shows RSPARAM; Favorites menu
+listed (`WB_BOOKMARK_CREATE`, `WB_BOOKMARKS_EDIT`) and Edit… opened its pop-up; unknown button,
+unknown menu entry and an unknown combo key refused with the valid ids; `WB_DELETE` refused by the gate.
+

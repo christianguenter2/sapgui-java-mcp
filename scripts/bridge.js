@@ -45,7 +45,7 @@
 // No generic eval endpoint – by design.
 
 (function () {
-  var BRIDGE_VERSION = "0.13.0";
+  var BRIDGE_VERSION = "0.14.0";
 
   var System = Java.type("java.lang.System");
   var Files = Java.type("java.nio.file.Files");
@@ -272,6 +272,14 @@
     if (path === "/press") {
       var el = tryCall(function () { return findEl(ses, body.id); }, null);
       if (el === null) return null;
+      if (str(body.button) !== "" && str(el.getClass().getSimpleName()) === "SapToolBarWrapper") {
+        var tbt = tryCall(function () { return toolbarButton(el, str(body.button)); }, null);
+        var tcode = str(body.menuItem) !== "" ? str(body.menuItem) : str(body.button);
+        var tlabel = tbt === null ? "" : (tbt.text || tbt.tooltip);
+        if (!ALV_VIEW_CODES.test(tcode) && (ALV_WRITE_CODES.test(tcode) || (tbt !== null && (isWriteLabel(tbt.text) || isWriteLabel(tbt.tooltip)))))
+          return "toolbar " + tcode + (tlabel ? " " + JSON.stringify(tlabel) : "");
+        return null;
+      }
       var id = relId(el.getId());
       var txt = str(tryCall(function () { return el.getText(); }, "")).trim();
       var tip = str(tryCall(function () { return el.getTooltip(); }, "")).trim();
@@ -467,6 +475,12 @@
         if (editorModified(n)) d.modified = true;
         var ch = editorChangeable(n);
         if (ch !== null) d.changeable = ch;
+      }
+      if (d.control === "SapToolBarWrapper") d.buttons = toolbarButtons(n);
+      if (d.control === "SapInputFieldWrapper" || d.control === "SapComboBoxWrapper") {
+        var lt = str(tryCall(function () { return n.getLabelText(); }, "")).trim();
+        if (lt !== "") d.label = lt;
+        if (d.control === "SapComboBoxWrapper") d.key = str(tryCall(function () { return n.getSelected(); }, ""));
       }
       if (d.control === "SapGridWrapper") {
         d.rowCount = tryCall(function () { return Number(n.getRowCount()); }, undefined);
@@ -706,10 +720,64 @@
     return res;
   }
 
+  // ---- toolbar controls (SapToolBarWrapper: SE80, editors, newer transactions) – not the dynpro
+  // toolbars tbar[0]/tbar[1]. Button ids are function codes; type Button, ButtonAndMenu, Menu,
+  // CheckBox, Separator, Group …
+  function toolbarButtons(tb) {
+    var n = Number(tryCall(function () { return tb.getButtonCount(); }, 0)), out = [];
+    for (var i = 0; i < n; i++) {
+      var type = str(tryCall(function () { return tb.getButtonType(i); }, ""));
+      var id = str(tryCall(function () { return tb.getButtonId(i); }, ""));
+      if (id === "" || /separator/i.test(type)) continue;
+      var b = { id: id, type: type,
+        text: str(tryCall(function () { return tb.getButtonText(i); }, "")).trim(),
+        tooltip: str(tryCall(function () { return tb.getButtonTooltip(i); }, "")).trim() };
+      if (!tryCall(function () { return tb.getButtonEnabled(i); }, true)) b.disabled = true;
+      if (/check/i.test(type) && tryCall(function () { return tb.getButtonChecked(i); }, false)) b.checked = true;
+      out.push(b);
+    }
+    return out;
+  }
+  function toolbarButton(tb, id) {
+    var bs = toolbarButtons(tb);
+    for (var i = 0; i < bs.length; i++) if (bs[i].id === id) return bs[i];
+    return null;
+  }
+
+  // combo box control entries: [{key, value}]
+  function comboEntries(cb) {
+    var out = [];
+    var es = toList(tryCall(function () { return cb.getEntries(); }, null));
+    for (var i = 0; i < es.length; i++) {
+      var e = es[i];
+      // each entry is a collection [key, text] (GuiCollectionWrapper)
+      var kv = toList(e).map(function (x) { return str(x); });
+      out.push({ key: kv[0] || "", value: (kv.length > 1 ? kv[1] : "").trim() });
+    }
+    return out;
+  }
+
   function opSet(ses, body) {
     var el = findEl(ses, body.id);
     var type = str(el.getType());
     var v = body.value;
+    var ctl = type === "GuiShell" ? str(el.getClass().getSimpleName()) : "";
+    if (ctl === "SapInputFieldWrapper") {
+      el.setText(str(v));
+      if (body.submit) el.submit();                         // like Enter in the field (e.g. SE80 object name)
+      return { ok: true, id: relId(el.getId()), type: ctl, value: body.submit ? str(v) : str(tryCall(function () { return el.getText(); }, "")), submitted: !!body.submit };
+    }
+    if (ctl === "SapComboBoxWrapper") {
+      var es = comboEntries(el), want = str(v), key = null;
+      for (var ci = 0; ci < es.length && key === null; ci++)
+        if (body.by === "value" ? es[ci].value.trim().toLowerCase() === want.trim().toLowerCase() : es[ci].key === want) key = es[ci].key;
+      if (key === null && es.length)
+        fail(404, "combo box " + relId(el.getId()) + " has no entry " + (body.by === "value" ? "with text " : "with key ") + JSON.stringify(want) +
+          " – entries: " + es.map(function (x) { return x.key + "=" + JSON.stringify(x.value); }).join(", "));
+      el.setSelected(key === null ? want : key);
+      el.selected();                                       // fire the selection event – setSelected alone only changes the display
+      return { ok: true, id: relId(el.getId()), type: ctl, value: str(tryCall(function () { return el.getSelected(); }, "")) };
+    }
     switch (type) {
       case "GuiCheckBox": el.setSelected(v === true || v === "true" || v === "X"); break;
       case "GuiRadioButton": el.select(); break;
@@ -726,6 +794,7 @@
   function opPress(ses, body) {
     var el = findEl(ses, body.id);
     var type = str(el.getType());
+    if (type === "GuiShell" && str(el.getClass().getSimpleName()) === "SapToolBarWrapper") return pressToolbarControl(ses, el, body);
     switch (type) {
       case "GuiButton": el.press(); break;
       case "GuiTab": case "GuiMenu": case "GuiRadioButton": el.select(); break;
@@ -739,6 +808,43 @@
       default: fail(400, "cannot press " + type + " (" + relId(el.getId()) + ") – use /grid or /tree for controls");
     }
     return after(ses, body, { ok: true, id: str(body.id), type: type });
+  }
+
+  // /press {id: toolbar control, button, menuItem?}: a button, or a menu button's entry. A menu button
+  // without menuItem opens its menu and returns the entries (like a context menu).
+  function pressToolbarControl(ses, tb, body) {
+    var bid = str(body.button);
+    if (bid === "") fail(400, "toolbar control " + relId(tb.getId()) + ": pass button (id from the screen's toolbar list)" +
+      " – buttons: " + toolbarButtons(tb).map(function (b) { return b.id + "=" + JSON.stringify(b.text || b.tooltip); }).join(", "));
+    var b = toolbarButton(tb, bid);
+    if (b === null) fail(404, "toolbar " + relId(tb.getId()) + " has no button " + bid + " – buttons: " +
+      toolbarButtons(tb).map(function (x) { return x.id + "=" + JSON.stringify(x.text || x.tooltip); }).join(", "));
+    if (b.disabled) fail(409, "toolbar button " + bid + " is disabled");
+    var res = { ok: true, id: relId(tb.getId()), type: "SapToolBarWrapper", button: bid };
+    if (/menu/i.test(b.type) && (str(body.menuItem) !== "" || /^menu$/i.test(b.type))) {
+      closeCtxMenu(tb);
+      tb.pressContextButton(bid);
+      var t = findEl(ses, body.id), items = null;
+      for (var k = 0; k < 15 && (items = ctxMenuItems(t, false)) === null; k++) Java.type("java.lang.Thread").sleep(100);
+      if (str(body.menuItem) === "") {
+        // list the entries and close the menu again – the next call picks one (button + menuItem)
+        if (items !== null) { res.contextMenu = items; res.menuHint = "sap_press with button " + bid + " and menuItem = code"; }
+        else res.note = "menu of " + bid + " did not appear";
+        closeCtxMenu(t);
+      } else {
+        var code = str(body.menuItem);
+        if (items !== null) {                                // validate + gate with the entry's text
+          try {
+            var e = ctxMenuEntry(items, { menuItem: code });
+            if (!ALV_VIEW_CODES.test(e.code) && (ALV_WRITE_CODES.test(e.code) || isWriteLabel(e.text)))
+              gateWrite(ses, "toolbar menu " + e.code + " " + JSON.stringify(e.path), body);
+          } catch (err) { closeCtxMenu(t); throw err; }
+        }
+        tb.selectMenuItem(code);
+        res.menuItem = code;
+      }
+    } else tb.pressButton(bid);
+    return after(ses, body, res);
   }
 
   // What a virtual key does on this screen: the front end does not know function codes (the server
@@ -1069,6 +1175,10 @@
     var pm = privateField(sh, "mLastContextMenu");
     if (pm !== null) return pm;
     var jo = privateField(sh, "mJavaObject");
+    // toolbar controls: the menu of a menu button (SapToolBar.mLastMenuVisible)
+    var tbm = jo === null ? null : privateField(jo, "mLastMenuVisible");
+    if (tbm === null) tbm = privateField(sh, "mLastMenuVisible");
+    if (tbm !== null) return tbm;
     return jo === null ? null : tryCall(function () { return jo.getContextMenu(); }, null);
   }
 

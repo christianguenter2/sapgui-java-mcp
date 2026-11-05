@@ -10,7 +10,7 @@ The agent works in **its own SAP GUI session** next to yours, every Save/Post ne
 confirmation, and screens come back in a compact, token-saving form. Design notes and everything
 learned on the way (with dates): [docs/mcp-outline.md](docs/mcp-outline.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
-> **Status: experimental (0.13.0).** Use it on **development, test and trial systems only** – never on
+> **Status: experimental (0.14.0).** Use it on **development, test and trial systems only** – never on
 > production. An AI agent drives a logged-on SAP GUI with your user's authorizations. The write gate
 > (`confirm`) is a **heuristic** based on button texts, OK-codes and pop-up questions in English and
 > German; it does not catch every write (a menu entry or key whose text is not a save/commit word in
@@ -109,8 +109,8 @@ screen incl. status bar and pop-up, so no extra `sap_screen` call is needed. `sa
 | `sap_status` | every SAP GUI process with a bridge, its connections and sessions (references, `(user)` / `← agent session for SID/client`), input formats once known |
 | `sap_screen` | the current screen (`view`, `includeMenus`, `maxNodes` default 400) |
 | `sap_start_transaction` | start a transaction (`tcode`); checked against `deniedTransactions` |
-| `sap_set_fields` | set text/checkbox/radio/combo values (`fields: [{id, value, by?}]`); optional `then` (`"Enter"`, `"Execute"`, … or `{press: id}`) – one call per input step |
-| `sap_press` | press a button, select a tab / menu entry / radio button (`id`); on a list line (`lbl[col,row]`) or field: cursor + double-click |
+| `sap_set_fields` | set text/checkbox/radio/combo values (`fields: [{id, value, by?, submit?}]`), also input fields and combo boxes inside controls (SE80 object type and name; `submit` = Enter in the field); optional `then` (`"Enter"`, `"Execute"`, … or `{press: id}`) – one call per input step |
+| `sap_press` | press a button, select a tab / menu entry / radio button (`id`); on a list line (`lbl[col,row]`) or field: cursor + double-click; toolbar controls (`control=SapToolBarWrapper`, buttons listed in the screen): `button` + `menuItem` for menu buttons (without it the entries are listed) |
 | `sap_send_key` | named key (Enter, Back, Execute, Save, Cancel, PageDown, …) or numeric VKey; optional `window` |
 | `sap_send_command` | OK-code (`command`, e.g. `/nSE16N`) |
 | `sap_read_grid` | ALV grid rows (`id`, `firstRow`, `maxRows` default 50, `columns`) plus toolbar ids, selected rows, current cell; waits for lazily loaded rows and warns about rows that stayed empty |
@@ -160,7 +160,8 @@ Refused with HTTP 428 unless the request has `confirm: true` **and** `expect`:
   the OK-code field + Enter);
 - keys bound to such a function on the current screen: for any F-key (Shift/Ctrl combinations too)
   the gate reads the toolbar button and menu entries the key triggers (e.g. Shift+F2 = "Delete…");
-  buttons and menu entries bound to Ctrl+S are Save in any logon language;
+  buttons and menu entries bound to Ctrl+S are Save in any logon language; toolbar control buttons and
+  their menu entries like ALV toolbar buttons;
 - actions that commit at once: buttons/menu entries Close/Release/Reverse/Delete (+ German);
   Yes or Enter in a pop-up whose question is about saving, posting, closing, deleting, reversing,
   releasing or creating; ALV toolbar buttons, toolbar menu entries and grid/tree context menu entries
@@ -267,7 +268,7 @@ an agent session ended by SAP (`/i`), screenshot. `--abap-program` (a program of
 ## Status
 
 Experimental, in use against development and trial systems since 2026-11-04. History and findings:
-[docs/mcp-outline.md](docs/mcp-outline.md) §7–§21.
+[docs/mcp-outline.md](docs/mcp-outline.md) §7–§22.
 
 ## License
 

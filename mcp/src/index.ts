@@ -12,7 +12,7 @@ import { userFormats, cachedFormats } from "./formats.js";
 import { agentSessions, openAgentSession, closeAgentSession } from "./session.js";
 
 const server = new McpServer(
-  { name: "sapgui-java", version: "0.13.0" },
+  { name: "sapgui-java", version: "0.14.0" },
   {
     instructions:
       "Drives a logged-on SAP GUI for Java session through its scripting API. " +
@@ -207,6 +207,8 @@ server.registerTool("sap_start_transaction", {
 server.registerTool("sap_set_fields", {
   title: "Set field values",
   description: "Set one or more fields in order. Text fields take a string; checkboxes true/false; radio buttons are selected (value ignored); combo boxes take the key (or the visible value with by='value'). " +
+    "Also input fields and combo boxes inside controls (control=SapInputFieldWrapper / SapComboBoxWrapper, e.g. SE80 object type and name); " +
+    "submit: true on an input field control submits it like Enter (e.g. SE80: shows the object) and returns the resulting screen. " +
     "Optional 'then': a key (e.g. \"Enter\", \"Execute\") or {press: id} sent after the fields – returns the resulting screen like sap_send_key/sap_press, saving a round trip. " +
     "Without 'then' nothing is sent and only the set values are returned.",
   inputSchema: {
@@ -214,6 +216,7 @@ server.registerTool("sap_set_fields", {
       id: z.string().describe("Element id from sap_screen, e.g. wnd[0]/usr/ctxtGD-TAB"),
       value: z.union([z.string(), z.boolean()]).optional(),
       by: z.enum(["key", "value"]).optional().describe("Combo boxes only."),
+      submit: z.boolean().optional().describe("Input field controls (SapInputFieldWrapper) only: submit after setting, like Enter in the field."),
     })).min(1),
     then: z.union([
       z.enum(Object.keys(VKEYS) as [string, ...string[]]),
@@ -224,11 +227,18 @@ server.registerTool("sap_set_fields", {
 }, async (a) => run(async () => {
   const out: string[] = [];
   const ex = parseExpect(a.expect);
+  let submitted = false;
   for (const f of a.fields) {
-    const r = await call("set", { session: a.session, system: a.system, id: f.id, value: f.value ?? "", by: f.by, expect: ex });
-    out.push(`${r.id} (${String(r.type).replace(/^Gui/, "")}) = ${JSON.stringify(r.value)}`);
+    const r = await call("set", { session: a.session, system: a.system, id: f.id, value: f.value ?? "", by: f.by, submit: f.submit, expect: ex });
+    out.push(`${r.id} (${String(r.type).replace(/^Gui/, "")}) = ${JSON.stringify(r.value)}${r.submitted ? " – submitted" : ""}`);
+    if (r.submitted) submitted = true;
   }
-  if (a.then === undefined) return out.join("\n");
+  if (a.then === undefined) {
+    if (!submitted) return out.join("\n");
+    // a submitted input field made a round trip – show what it led to
+    const s = await call<Screen>("screen", { session: a.session, system: a.system });
+    return `${out.join("\n")}\n${renderScreen(s, a.view ?? "changed")}`;
+  }
   // the guard still applies: the fields did not change the dynpro, so the same expect holds
   if (typeof a.then === "string") {
     const vkey = VKEYS[a.then];
@@ -239,9 +249,20 @@ server.registerTool("sap_set_fields", {
 
 server.registerTool("sap_press", {
   title: "Press button / select tab or menu",
-  description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. On a list line (lbl[col,row]) or a field it sets the cursor there and double-clicks (F2), e.g. to pick a line in a classic list. Returns the resulting screen.",
-  inputSchema: { id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8]"), session, system, view, expect, confirm },
-}, async (a) => run(async () => withScreen(`pressed ${a.id}`, await call("press", { ...a, expect: parseExpect(a.expect) }), a.view)));
+  description: "Press a button or toolbar button, select a tab, menu entry or radio button by element id. On a list line (lbl[col,row]) or a field it sets the cursor there and double-clicks (F2), e.g. to pick a line in a classic list. " +
+    "Toolbar controls (control=SapToolBarWrapper, buttons listed in the screen): id = the toolbar, button = button id; for a menu button also " +
+    "menuItem (without it the menu's entries are returned). Buttons and menu entries that save/delete/post are gated (confirm + expect). Returns the resulting screen.",
+  inputSchema: {
+    id: z.string().describe("Element id, e.g. wnd[0]/tbar[1]/btn[8], or a toolbar control"),
+    button: z.string().optional().describe("Toolbar controls only: button id from the screen's toolbar list"),
+    menuItem: z.string().optional().describe("Toolbar controls only: entry of a menu button"),
+    session, system, view, expect, confirm,
+  },
+}, async (a) => run(async () => {
+  const r = await call("press", { ...a, expect: parseExpect(a.expect) });
+  const head = a.button ? `pressed ${a.button}${a.menuItem ? " > " + a.menuItem : ""} in ${a.id}` : `pressed ${a.id}`;
+  return withScreen(head + formatCtxMenu(r), r, a.view);
+}));
 
 server.registerTool("sap_send_key", {
   title: "Send virtual key",

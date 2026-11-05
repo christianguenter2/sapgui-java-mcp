@@ -4,7 +4,8 @@ export interface Element {
   id: string; type: string; text?: string; tooltip?: string; changeable?: boolean;
   selected?: boolean; key?: string; required?: boolean; control?: string; subtype?: string;
   rowCount?: number; title?: string; html?: string; htmlError?: string;
-  lineCount?: number; modified?: boolean;
+  lineCount?: number; modified?: boolean; label?: string;
+  buttons?: { id: string; type: string; text: string; tooltip: string; disabled?: boolean; checked?: boolean }[];
 }
 export interface Popup { title: string; texts: string[]; buttons: { id: string; text: string }[] }
 export interface Screen {
@@ -48,6 +49,9 @@ export function formatElement(e: Element): string {
   if (e.required) parts.push("required");
   if (e.control) parts.push(`control=${e.control}${e.subtype ? "/" + e.subtype : ""}`);
   if (e.rowCount !== undefined) parts.push(`rows=${e.rowCount}`);
+  if (e.label) parts.push(`label=${q(e.label)}`);
+  if (e.key !== undefined && e.control === "SapComboBoxWrapper") parts.push(`key=${q(e.key)}`);
+  if (e.buttons?.length) parts.push(`buttons: ${e.buttons.map(b => `${b.id}=${q(b.text || b.tooltip)}${/menu/i.test(b.type) ? " (menu)" : ""}${b.disabled ? " (disabled)" : ""}${b.checked ? " [x]" : ""}`).join(", ")}`);
   if (e.lineCount !== undefined) parts.push(`lines=${e.lineCount}${e.changeable === false ? " ro" : e.changeable ? " editable" : ""}${e.modified ? " modified" : ""} (sap_read_text)`);
   if (e.title) parts.push(`title=${q(e.title)}`);
   if (e.html) parts.push(`html=${q(e.html.length > 300 ? e.html.slice(0, 300) + " …" : e.html)}`);
@@ -177,7 +181,7 @@ export function formatList(l: ListResult, firstRow = 0, maxRows = 200): string {
 
 // ---- context menus of grid and tree controls
 export interface CtxMenuEntry { code: string; text: string; path: string; level: number; enabled: boolean; submenu?: boolean; checked?: boolean }
-export interface CtxMenuResult { contextMenu?: CtxMenuEntry[]; selected?: { code: string; text: string }; note?: string }
+export interface CtxMenuResult { contextMenu?: CtxMenuEntry[]; selected?: { code: string; text: string }; note?: string; menuHint?: string }
 
 // " – selected CODE "Text"", or the open menu's entries (one per line, indented by submenu level)
 export function formatCtxMenu(r: CtxMenuResult): string {
@@ -185,7 +189,8 @@ export function formatCtxMenu(r: CtxMenuResult): string {
   if (r.note) return ` – ${r.note}`;
   if (!r.contextMenu) return "";
   if (r.contextMenu.length === 0) return "\ncontext menu is open but empty (closeContextMenu)";
-  const lines = [`\ncontext menu (${r.contextMenu.filter(e => !e.submenu).length} entries; selectContextMenuItem with menuItem = code, or closeContextMenu):`];
+  const how = r.menuHint ?? "selectContextMenuItem with menuItem = code, or closeContextMenu";
+  const lines = [`\n${r.menuHint ? "menu" : "context menu"} (${r.contextMenu.filter(e => !e.submenu).length} entries; ${how}):`];
   for (const e of r.contextMenu) {
     const pad = "  ".repeat(e.level + 1);
     const flags = [e.enabled ? "" : "disabled", e.checked === undefined ? "" : (e.checked ? "checked" : "unchecked")].filter(Boolean);

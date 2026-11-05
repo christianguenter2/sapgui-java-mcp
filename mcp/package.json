@@ -1,6 +1,6 @@
 {
   "name": "sapgui-java-mcp",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "MCP server that drives SAP GUI for Java through the in-GUI scripting bridge (scripts/bridge.js)",
   "type": "module",
   "bin": {
