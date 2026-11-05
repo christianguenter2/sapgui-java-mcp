@@ -452,3 +452,9 @@ the scripting API. Driving its Swing controls directly would be the only way aro
 fragile. Debugging belongs to ADT (the debugger REST API). Do not send `/h` through this MCP: it
 freezes scripting for the whole SAP GUI process until someone continues the debugger by hand.
 
+**Web GUI, for comparison** (same day, A4H Web GUI driven from Chrome): `/h` and SE38's "Debugging"
+(Shift+F5) are refused with SY620 "Action not possible in SAP GUI for HTML. Use external debugging." –
+long text: direct debugging in SAP GUI for HTML with the classic debugger is no longer supported; use
+ADT in Eclipse or SAP GUI for Windows with external breakpoints and restart the request. So there is
+no GUI route for an agent at all; ADT is the one.
+

@@ -38,12 +38,13 @@ comparison below is from building this project, not from a head-to-head benchmar
 | Prerequisites on the client | SAP GUI for Java, this bridge, Node.js | Just a browser – any operating system |
 | Stability | Relies partly on undocumented SAP GUI internals (see above) – a SAP GUI update can break parts; `npm run test:live` catches that | Public web technology, but Web GUI's HTML is not a stable interface either |
 | Fiori apps | Not covered | Same browser, same tool |
-| ABAP debugger | Not possible – the scripting API blocks while the debugger holds the session ([docs/mcp-outline.md §23](docs/mcp-outline.md)) | Not tested |
+| ABAP debugger | Not possible – the scripting API blocks while the debugger holds the session ([docs/mcp-outline.md §23](docs/mcp-outline.md)) | Not supported – `/h` and SE38 "Debugging" are refused with message SY620 ("Action not possible in SAP GUI for HTML. Use external debugging.") |
 
 In short: for classic transactions – development, customizing, reading tables and lists – this MCP
 gives the agent structured data with SAP-aware safety rails at a fraction of the tokens. Web GUI in a
 browser is the fallback where SAP GUI for Java is not installed, and the way to reach Fiori apps.
-For debugging, use ADT (the ABAP Development Tools' REST API) rather than either GUI.
+For debugging, neither works: use ADT (the ABAP Development Tools) with external breakpoints – which is
+also what SAP's message in Web GUI recommends.
 
 ## Requirements
 
