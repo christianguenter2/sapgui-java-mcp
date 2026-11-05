@@ -1,13 +1,13 @@
 # sapgui-java-mcp – outline
 
 MCP server that lets Claude drive **SAP GUI for Java 8.10 on Linux** through the
-GUI's built-in scripting API. Status: built and in use against DEV/100 (2026-11-04); this file keeps the design and the findings.
+GUI's built-in scripting API. Status: built and in use against a development system (2026-11-04); this file keeps the design and the findings.
 
 ## 1. Facts established so far
 
 | Fact | Source |
 |---|---|
-| DEV `sapgui/user_scripting = TRUE` (since 2026-11-04); `_per_user`, `_set_readonly`, `_disable_recording`, `_force_notification` = FALSE | RFC `SPFL_PARAMETER_GET_VALUE` |
+| Dev system: `sapgui/user_scripting = TRUE` (since 2026-11-04); `_per_user`, `_set_readonly`, `_disable_recording`, `_force_notification` = FALSE | RFC `SPFL_PARAMETER_GET_VALUE` |
 | Installed client: SAP GUI for Java 8.10 rev 14, SapMachine 21 | `~/SAPClients/SAPGUI8.10rev14` |
 | Script engine: GraalJS if `org.graalvm.polyglot.Context` is on the classpath, else Nashorn (`JavaScript`). Install ships **Nashorn 15.7 only** → ES5.1 | `GuiJavaScriptInterpreter.getJSEngineName`, `jar/nashorn*S.jar` |
 | Preset script globals: `application`, `connection`, `session` | `GuiJavaScriptInterpreter.createNewScope` |
@@ -15,7 +15,7 @@ GUI's built-in scripting API. Status: built and in use against DEV/100 (2026-11-
 | Script folders: setting `scriptsDir` (default `<sapgui home>/scripts`), output `fileOutputDir` | `GuiScriptDirectories` |
 | API surface = Windows Scripting API object model: `findById`, `startTransaction`, `sendCommand`, `sendVKey`, `HardCopy` (screenshot), status bar `messageType/Id/Number`, `info.*` | `com/sap/platin/{base,r3}/api/scripting/*Wrapper` |
 | Controls have their own wrappers in the control jars: `advancedGrid.SapGridWrapper` (ALV: `getRowCount`, `getCellValue`, `getColumnTitles`, `setCurrentCell`, `pressToolbarButton`, `doubleClick`…), `tree.SapTreeWrapper` (`expandNode`, `getNodeTextByKey`, `selectNode`, `getItemText`…), plus TextEdit, ABAP editor, HTML, toolbar, calendar | control jars; tree seen live on Easy Access |
-| **Smoke test v2 on DEV (2026-11-04): all checks pass** – session DEV/100, `findById`, status bar, full tree walk; preset objects are normal Java objects (886 direct calls, 0 reflection); scripts run on a worker thread (`Thread-N`, not EDT); GUI calls work from a **background thread** and via `invokeAndWait`; loopback `ServerSocket` OK | `~/sapgui-java-smoke-test.txt` |
+| **Smoke test v2 (2026-11-04): all checks pass** – session found, `findById`, status bar, full tree walk; preset objects are normal Java objects (886 direct calls, 0 reflection); scripts run on a worker thread (`Thread-N`, not EDT); GUI calls work from a **background thread** and via `invokeAndWait`; loopback `ServerSocket` OK | `~/sapgui-java-smoke-test.txt` |
 | Scripting state is fixed at logon: a connection opened before RZ11 change stays `isDisabledByServer = true` (preset `session` is then the string "Scripting this object is not allowed by the server") | smoke test v2 first run |
 
 ## 2. Architecture
@@ -74,7 +74,7 @@ sees the effect of each step without an extra call.
 
 - Loopback only, random port, 256-bit token, token file 600, bridge stops when GUI exits.
 - No generic eval endpoint by default (an eval endpoint = arbitrary code in a logged-in SAP session).
-- Allow-list DEV/100 only to start; refuse production SIDs by config.
+- Allow-list the development system only; refuse production SIDs by config.
 - Audit log of every write action.
 - The GUI's "a script is attaching" notification: keep it on for manual use; the bridge attaches once at start.
 
@@ -159,7 +159,7 @@ columns (T001-STCEG) and cost 3 s of waiting. Total wait per request is capped a
 mapping of the empty DCPFM to "1.234.567,89" was right only by accident; empty must mean unknown.
 `sap_user_formats` reads SU3 → tab Defaults (`cmbSUID_ST_NODE_DEFAULTS-DATFM/-DCPFM/-TIMEFM`,
 `txtTTZCU-TZONESYS`) in a separate session (`/oSU3`, closed with `/i`), cached per system/client/user.
-DEV/100 TESTUSER: DATFM 1 (DD.MM.YYYY), DCPFM blank (combo key trimmed to "" → 1.234.567,89), TIMEFM 0.
+Test user: DATFM 1 (DD.MM.YYYY), DCPFM blank (combo key trimmed to "" → 1.234.567,89), TIMEFM 0.
 Watch out: `lbl…-DATFM` ends like the field – match on the field types, not on the name alone.
 
 **Write gate.** In the bridge (`writeIntent` + `checkWrite`), because only the bridge sees the
@@ -170,7 +170,7 @@ Save/Post/Buchen/Sichern/Speichern/Enregistrer/Comptabiliser, OK-codes `=BU =SAV
 Enter unaffected).
 
 **Extension (bridge 0.5.0, 2026-11-05).** ZCLOSE showed that not every write is called Save: "Close"
-plus Yes in an SPO1 pop-up closed posting key <recon-key> at once, without the gate noticing.
+plus Yes in an SPO1 pop-up closed the day's posting key at once, without the gate noticing.
 Now also gated:
 - buttons whose text/tooltip starts with Close/Release/Reverse/Delete/Freigeben/Löschen/Stornieren/
   Schliessen/Abschliessen ("Cancel" = F12 is navigation and stays free);
@@ -200,9 +200,9 @@ program maps to saving, ALV toolbar buttons (`pressToolbarButton`).
   program no longer existed → SE54 offered only Create, menu Change/Delete disabled. Cleaned up via the
   initial screen's "Generated Objects" Delete (`btn*VIMDYNFLDS-PUSH_DELE` – the `*` one; the first
   Delete belongs to "ABAP Dictionary"): maintenance module, TVDIR, OBJH type S removed (TDDAT went
-  with it); OBJH type C (view cluster) and the table kept. Recorded in <request> / task <request>.
+  with it); OBJH type C (view cluster) and the table kept. Recorded in the developer's open workbench request.
   The orphaned TADIR `R3TR FUGR /XYZ/CFG_PARAM_M` stays (RSWBO052 cannot delete entries; SAP: TK/233
-  "object does not exist"); it is in <request>, so the import deletes it in the target as well.
+  "object does not exist"); it is in that request, so the import deletes it in the target as well.
 - The write gate caught the menu entry "Delete" too (it reads the element text for every press).
 
 ## 12. Agent session and bridge auto-start – 2026-11-05
@@ -248,7 +248,7 @@ passes in `sapgui-java-mcp.script`). Launcher: `scripts/install-autostart.sh`.
   Order" pop-up `wnd[1]` was open and stacked a third window. Now actions (`/set`, `/press`,
   `/grid_action`, `/tree_action`) on elements of a window below the active modal window → 409.
   Reads stay allowed.
-- Verified on DEV: SE03 tool tree doubleClick RSWBO052 opens the report (replaces the SA38 detour);
+- Verified: SE03 tool tree doubleClick RSWBO052 opens the report (replaces the SA38 detour);
   Easy Access collapse/expand; SE16H T001 grid toolbar listing, selectRows, setCurrentCell,
   &SORT_DSC (opens the sort dialog – ALV sorts by selected *column*), doubleClick → detail pop-up;
   &DATA_SAVE refused by the gate.

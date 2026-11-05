@@ -134,7 +134,7 @@ Column titles are corrected for reordered line layouts. Outline §7.
 `~/.sapgui-java-mcp/` (dir 700, files 600):
 
 - `config.json` (optional):
-  - `allowedSystems` – `["SID/client", …]`, default `["DEV/100"]` (bridge)
+  - `allowedSystems` – `["SID/client", …]`, **required**: without it the bridge refuses every session (bridge)
   - `readOnly` – `true` rejects all write actions, default `false` (bridge)
   - `confirmWrites` – default `true`: write gate on (bridge)
   - `bridgeScript` – path of `bridge.js`; only needed for reload when started from the Scripting menu (bridge)
@@ -188,6 +188,6 @@ First-time diagnostics: `scripts/sgj-smoke-test.js` from the Scripting menu writ
 
 ## Status
 
-Working against DEV/100 since 2026-11-04. Open: context menus (grid/tree), screenshots
+In use against a development system since 2026-11-04. Open: context menus (grid/tree), screenshots
 (`HardCopy`), text edit / ABAP editor controls, automated tests and CI. History and findings:
 [docs/mcp-outline.md](docs/mcp-outline.md) §7–§13.

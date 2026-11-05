@@ -1,6 +1,6 @@
 // SAP GUI for Java 8.10 – scripting smoke test v2 (READ-ONLY, changes nothing in SAP)
 //
-// Run: log on to DEV, open any transaction, then start this file via the
+// Run: log on to the system, open any transaction, then start this file via the
 // Scripting menu / script window of SAP GUI for Java.
 // Output: ~/sapgui-java-smoke-test.txt (+ a short summary dialog).
 //

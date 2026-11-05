@@ -86,7 +86,7 @@
   function fail(status, message) { throw new BridgeError(status, message); }
 
   function loadConfig() {
-    var cfg = { allowedSystems: ["DEV/100"], readOnly: false };
+    var cfg = { allowedSystems: [], readOnly: false };   // allowedSystems must be configured
     try {
       if (Files.exists(cfgFile)) {
         var c = JSON.parse(readText(cfgFile));
@@ -292,7 +292,9 @@
     var inf = sessionInfo(ses);
     var key = inf.system + "/" + inf.client;
     var allowed = toList(cfg.allowedSystems);
-    if (allowed.length > 0 && allowed.indexOf(key) < 0 && allowed.indexOf("*") < 0)
+    if (allowed.length === 0)
+      fail(403, "no allowedSystems configured – add e.g. {\"allowedSystems\": [\"" + key + "\"]} to " + cfgFile + " (use [\"*\"] to allow every system)");
+    if (allowed.indexOf(key) < 0 && allowed.indexOf("*") < 0)
       fail(403, "system " + key + " not in allowedSystems " + JSON.stringify(allowed));
     if (isWrite && cfg.readOnly) fail(403, "bridge is in readOnly mode");
     if (isWrite && inf.readOnly) fail(403, "SAP scripting is read-only for this session");

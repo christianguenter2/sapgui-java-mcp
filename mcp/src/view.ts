@@ -19,7 +19,7 @@ const PREFIX = /^(lbl|txt|ctxt|chk|rad|cmb|pwd|btn|okcd|tbl|cntl|sub|tabs|tabp|s
 
 function q(s: string | undefined): string { return s === undefined ? "" : JSON.stringify(s); }
 // Segment separator in SAP GUI ids: a "/" followed by a lowercase type prefix (usr, tbl, txt, wnd[0] …).
-// Names may contain namespace slashes – "tbl/XYZ/SAPLCFG_PARAM_VTCTRL_/XYZ/CFG_PARAM_V" is ONE segment –
+// Names may contain namespace slashes – "tbl/XYZ/SAPLCFG_VTCTRL_/XYZ/CFG_V" is ONE segment –
 // and those are followed by uppercase DDIC names, so they are not separators.
 function lastSep(id: string): number {
   for (let i = id.length - 1; i > 0; i--) if (id[i] === "/" && /[a-z]/.test(id[i + 1] ?? "")) return i;
