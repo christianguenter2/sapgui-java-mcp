@@ -2,8 +2,42 @@
 
 Lets Claude drive **SAP GUI for Java on Linux** through the SAP GUI scripting API, via MCP.
 
-```
-Claude Code ⇄ MCP server (Node, stdio, mcp/) ⇄ HTTP 127.0.0.1 + token ⇄ scripts/bridge.js (Nashorn, inside SAP GUI) ⇄ scripting API
+```mermaid
+flowchart LR
+    claude["<b>Claude Code</b><br/>or any MCP client"]
+
+    subgraph mcp["MCP server · mcp/ · Node.js"]
+        tools["<b>sap_* tools</b><br/>compact screen views<br/>own agent session<br/>deniedTransactions"]
+    end
+
+    subgraph dir["~/.sapgui-java-mcp/"]
+        reg[("bridges/PID.json<br/>port + token")]
+        cfg[("config.json<br/>allowedSystems · readOnly")]
+        log[("bridge.log<br/>audit of writes")]
+    end
+
+    subgraph jvm["SAP GUI for Java JVM · one per logon process"]
+        agent["<b>agent/bridge-agent.jar</b><br/>-javaagent, starts the bridge<br/>once the GUI is up"]
+        bridge["<b>scripts/bridge.js</b><br/>Nashorn · HTTP 127.0.0.1:random<br/>write gate · screen guard (expect)"]
+        api["SAP GUI scripting API<br/>+ undocumented internals"]
+        user["your session<br/>ses[0]"]
+        own["agent's session<br/>ses[1]"]
+    end
+
+    sap[("ABAP system<br/>sapgui/user_scripting = TRUE")]
+
+    claude <-->|"MCP · stdio"| tools
+    tools <-->|"HTTP + Bearer token"| bridge
+    tools -.->|"finds bridges"| reg
+    bridge -.->|"registers"| reg
+    bridge -.-> cfg
+    bridge -.-> log
+    agent -->|"evaluates in the GUI's<br/>script interpreter"| bridge
+    bridge <--> api
+    api --- own
+    api -.-|"only on request"| user
+    own <-->|"DIAG"| sap
+    user <-->|"DIAG"| sap
 ```
 
 The agent works in **its own SAP GUI session** next to yours, every Save/Post needs an explicit
